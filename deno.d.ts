@@ -6,5 +6,5 @@ declare const Deno: {
 };
 
 declare module 'https://esm.sh/@supabase/supabase-js@2' {
-  export function createClient(url: string, key: string): any;
+  export function createClient(url: string, key: string, options?: any): any;
 }

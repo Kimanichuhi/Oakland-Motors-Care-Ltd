@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { formatKes, formatDate, formatDateTime, computeLineTotal } from '@/lib/formatting';
 import { statusStyles, JOB_TRANSITIONS, PAYMENT_METHODS } from '@/lib/constants';
 import { loadUserPermissions, hasPermission, clearPermissionCache, type UserPermission } from '@/lib/permissions';
-import type { Customer, Vehicle, Service, Part, Supplier, JobCard, JobCardLabour, JobCardPart, JobCardStatusHistory, Invoice, InvoiceItem, Payment, Quotation, QuotationItem, PurchaseOrder, PurchaseOrderItem, StockMovement, Employee, Notification, AuditLog, BusinessSettings, Role, Permission } from '@/lib/types';
+import type { Customer, Vehicle, Service, Part, Supplier, JobCard, JobCardLabour, JobCardPart, JobCardStatusHistory, Invoice, InvoiceItem, Payment, Quotation, QuotationItem, PurchaseOrder, PurchaseOrderItem, StockMovement, Employee, Notification, AuditLog, BusinessSettings, Role, Permission, Profile } from '@/lib/types';
 import {
   ArrowUpRight, Bell, CarFront, CheckCircle2, ChevronDown, CircleDollarSign, ClipboardList, Gauge,
   LayoutDashboard, LogOut, Menu, Package, Plus, Search, Settings, ShieldCheck, Sparkles, Users,
@@ -47,16 +47,15 @@ const NAV_GROUPS: { label: string; items: { id: SectionId; label: string; icon: 
     { id: 'notifications', label: 'Notifications', icon: <Bell size={18} />, perm: 'dashboard.view' },
     { id: 'audit', label: 'Audit Logs', icon: <ScrollText size={18} />, perm: 'audit.view' },
     { id: 'settings', label: 'Settings', icon: <Settings size={18} />, perm: 'settings.manage' },
-    { id: 'users', label: 'Users & Roles', icon: <ShieldCheck size={18} />, perm: 'settings.manage' },
+    { id: 'users', label: 'Users & Roles', icon: <ShieldCheck size={18} />, perm: 'users.manage' },
   ] },
 ];
-
-const ADMIN_EMAIL = 'kimanichuhi254@gmail.com';
 
 export default function Home() {
   const [session, setSession] = useState<Awaited<ReturnType<typeof supabase.auth.getSession>>['data']['session']>(null);
   const [authError, setAuthError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [initialized, setInitialized] = useState<boolean | null>(null);
   const [section, setSection] = useState<SectionId>('dashboard');
   const [userPerms, setUserPerms] = useState<UserPermission>({ permissions: [], role: '', roleLabel: '', fullName: '' });
   const [query, setQuery] = useState('');
@@ -84,17 +83,22 @@ export default function Home() {
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  const [permsLoaded, setPermsLoaded] = useState(false);
+
   useEffect(() => {
+    supabase.rpc('is_system_initialized').then(({ data }) => setInitialized(Boolean(data)));
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setLoading(false);
-      if (data.session) void loadUserPermissions().then(setUserPerms);
+      if (data.session) void loadUserPermissions().then((p) => { setUserPerms(p); setPermsLoaded(true); });
+      else setPermsLoaded(true);
     });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
       clearPermissionCache();
-      if (nextSession) void loadUserPermissions().then(setUserPerms);
-      else setUserPerms({ permissions: [], role: '', roleLabel: '', fullName: '' });
+      setPermsLoaded(false);
+      if (nextSession) void loadUserPermissions().then((p) => { setUserPerms(p); setPermsLoaded(true); });
+      else { setUserPerms({ permissions: [], role: '', roleLabel: '', fullName: '' }); setPermsLoaded(true); }
     });
     if ('serviceWorker' in navigator) void navigator.serviceWorker.register('/sw.js');
     const updateOnline = () => setOnline(navigator.onLine);
@@ -118,8 +122,10 @@ export default function Home() {
     items: group.items.filter((item) => can(item.perm)),
   })).filter((group) => group.items.length > 0), [userPerms]);
 
-  if (loading) return <div className="loading-screen"><div className="brand-mark">OM</div><p>Oakland Motors</p></div>;
+  if (loading || initialized === null) return <div className="loading-screen"><div className="brand-mark">OM</div><p>Oakland Motors</p></div>;
+  if (!initialized) return <SetupWizard session={session} onComplete={() => setInitialized(true)} />;
   if (!session) return <AuthScreen error={authError} setError={setAuthError} />;
+  if (permsLoaded && userPerms.permissions.length === 0) return <AccountInactiveScreen onSignOut={() => void signOut()} />;
 
   return <main className="app-shell">
     {showMobileNav && <div className="nav-overlay" onClick={() => setShowMobileNav(false)} />}
@@ -277,12 +283,6 @@ function AuthScreen({ error, setError }: { error: string; setError: (v: string) 
     setError('');
 
     const normalizedEmail = email.trim().toLowerCase();
-    if (normalizedEmail !== ADMIN_EMAIL.toLowerCase()) {
-      setBusy(false);
-      setError('Only the system administrator can sign in.');
-      return;
-    }
-
     const { error: authError } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
     setBusy(false);
 
@@ -291,7 +291,71 @@ function AuthScreen({ error, setError }: { error: string; setError: (v: string) 
     }
   }
 
-  return <div className="auth-layout"><div className="auth-panel"><div className="auth-card"><div className="auth-brand-row"><div className="brand-mark">OM</div><span>Oakland Motors</span></div><div className="auth-icon"><Wrench size={22} /></div><h2>Welcome back</h2><p className="muted">Sign in to continue.</p><form onSubmit={submit}><label>Work email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="kimanichuhi254@gmail.com" required /></label><label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" minLength={6} required /></label>{error && <div className="form-error">{error}</div>}<button className="button primary wide" disabled={busy}>{busy ? 'Please wait...' : 'Sign in'} <ArrowUpRight size={17} /></button></form></div></div></div>;
+  return <div className="auth-layout"><div className="auth-panel"><div className="auth-card"><div className="auth-brand-row"><div className="brand-mark">OM</div><span>Oakland Motors</span></div><div className="auth-icon"><Wrench size={22} /></div><h2>Welcome back</h2><p className="muted">Sign in to continue.</p><form onSubmit={submit}><label>Work email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@oaklandmotors.co.ke" required /></label><label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" minLength={6} required /></label>{error && <div className="form-error">{error}</div>}<button className="button primary wide" disabled={busy}>{busy ? 'Please wait...' : 'Sign in'} <ArrowUpRight size={17} /></button></form></div></div></div>;
+}
+
+// === SETUP WIZARD ===
+type AppSession = Awaited<ReturnType<typeof supabase.auth.getSession>>['data']['session'];
+
+function SetupWizard({ session, onComplete }: { session: AppSession; onComplete: () => void }) {
+  const [step, setStep] = useState<'account' | 'business'>(session ? 'business' : 'account');
+  const [fullName, setFullName] = useState(''); const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [confirmPassword, setConfirmPassword] = useState('');
+  const [businessName, setBusinessName] = useState('Oakland Motors'); const [address, setAddress] = useState(''); const [phone, setPhone] = useState(''); const [bizEmail, setBizEmail] = useState('');
+  const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
+
+  async function submitAccount(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+    if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
+    if (password !== confirmPassword) { setError('Passwords do not match.'); return; }
+    setBusy(true);
+    const { error: signUpError } = await supabase.auth.signUp({ email: email.trim().toLowerCase(), password, options: { data: { full_name: fullName } } });
+    setBusy(false);
+    if (signUpError) { setError(signUpError.message || 'Unable to create the administrator account.'); return; }
+    setStep('business');
+  }
+
+  async function submitBusiness(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    const { error: initError } = await supabase.rpc('initialize_system', { p_business_name: businessName, p_address: address || null, p_phone: phone || null, p_email: bizEmail || null });
+    setBusy(false);
+    if (initError) { setError(initError.message || 'Unable to complete setup. Please try again.'); return; }
+    onComplete();
+  }
+
+  return <div className="auth-layout"><div className="auth-panel"><div className="auth-card">
+    <div className="auth-brand-row"><div className="brand-mark">OM</div><span>Oakland Motors</span></div>
+    <div className="auth-icon"><Sparkles size={22} /></div>
+    <h2>Welcome to Oakland Motors</h2>
+    <p className="muted">{step === 'account' ? 'This looks like a fresh installation. Create the administrator account to get started.' : 'Tell us a little about your business to finish setup.'}</p>
+    {step === 'account' ? <form onSubmit={submitAccount}>
+      <label>Your full name<input value={fullName} onChange={(e) => setFullName(e.target.value)} required placeholder="e.g. Brian Otieno" /></label>
+      <label>Work email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@oaklandmotors.co.ke" /></label>
+      <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} placeholder="At least 8 characters" /></label>
+      <label>Confirm password<input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required minLength={8} /></label>
+      {error && <div className="form-error">{error}</div>}
+      <button className="button primary wide" disabled={busy}>{busy ? 'Please wait...' : 'Continue'} <ArrowUpRight size={17} /></button>
+    </form> : <form onSubmit={submitBusiness}>
+      <label>Business name<input value={businessName} onChange={(e) => setBusinessName(e.target.value)} required /></label>
+      <label>Address <span className="optional">Optional</span><input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Nairobi, Kenya" /></label>
+      <label>Phone <span className="optional">Optional</span><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+254 700 000 000" /></label>
+      <label>Business email <span className="optional">Optional</span><input type="email" value={bizEmail} onChange={(e) => setBizEmail(e.target.value)} /></label>
+      {error && <div className="form-error">{error}</div>}
+      <button className="button primary wide" disabled={busy}>{busy ? 'Finishing setup...' : 'Complete setup'} <ArrowUpRight size={17} /></button>
+    </form>}
+  </div></div></div>;
+}
+
+function AccountInactiveScreen({ onSignOut }: { onSignOut: () => void }) {
+  return <div className="auth-layout"><div className="auth-panel"><div className="auth-card">
+    <div className="auth-brand-row"><div className="brand-mark">OM</div><span>Oakland Motors</span></div>
+    <div className="auth-icon"><ShieldCheck size={22} /></div>
+    <h2>Account not active</h2>
+    <p className="muted">Your account doesn&apos;t have an active role yet, or has been suspended. Contact your administrator to get access.</p>
+    <button className="button secondary wide" onClick={onSignOut}>Sign out</button>
+  </div></div></div>;
 }
 
 // === DASHBOARD ===
@@ -1008,24 +1072,32 @@ function SettingsSection({ onNotice }: { onNotice: (m: string) => void }) {
 }
 
 // === USERS & ROLES ===
+type StaffRow = Profile & { user_roles: { role_id: string; roles: { name: string; label: string } | null }[] };
+
 function UsersSection({ onNotice }: { onNotice: (m: string) => void }) {
   const [roles, setRoles] = useState<Role[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [rolePerms, setRolePerms] = useState<Record<string, string[]>>({});
+  const [staff, setStaff] = useState<StaffRow[]>([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    (async () => {
-      const [r, p, rp] = await Promise.all([
-        supabase.from('roles').select('*').order('name'),
-        supabase.from('permissions').select('*').order('key'),
-        supabase.from('role_permissions').select('role_id, permissions(key)'),
-      ]);
-      setRoles((r.data ?? []) as Role[]); setPermissions((p.data ?? []) as Permission[]);
-      const map: Record<string, string[]> = {};
-      for (const item of (rp.data as unknown as { role_id: string; permissions: { key: string } }[]) ?? []) { if (!map[item.role_id]) map[item.role_id] = []; map[item.role_id].push(item.permissions.key); }
-      setRolePerms(map); setLoading(false);
-    })();
-  }, []);
+  const [showInvite, setShowInvite] = useState(false);
+
+  async function loadAll() {
+    const [r, p, rp, s] = await Promise.all([
+      supabase.from('roles').select('*').order('name'),
+      supabase.from('permissions').select('*').order('key'),
+      supabase.from('role_permissions').select('role_id, permissions(key)'),
+      supabase.from('profiles').select('*, user_roles(role_id, roles(name,label))').order('full_name'),
+    ]);
+    setRoles((r.data ?? []) as Role[]); setPermissions((p.data ?? []) as Permission[]);
+    const map: Record<string, string[]> = {};
+    for (const item of (rp.data as unknown as { role_id: string; permissions: { key: string } }[]) ?? []) { if (!map[item.role_id]) map[item.role_id] = []; map[item.role_id].push(item.permissions.key); }
+    setRolePerms(map);
+    setStaff((s.data ?? []) as StaffRow[]);
+    setLoading(false);
+  }
+  useEffect(() => { void loadAll(); }, []);
+
   async function togglePerm(roleId: string, permKey: string) {
     const has = rolePerms[roleId]?.includes(permKey);
     if (has) {
@@ -1038,14 +1110,75 @@ function UsersSection({ onNotice }: { onNotice: (m: string) => void }) {
     setRolePerms((prev) => { const next = { ...prev }; if (has) next[roleId] = (next[roleId] ?? []).filter((k) => k !== permKey); else next[roleId] = [...(next[roleId] ?? []), permKey]; return next; });
     onNotice('Role permissions updated.');
   }
+
+  async function callAdmin(body: Record<string, unknown>) {
+    const { data, error } = await supabase.functions.invoke('admin-users', { body });
+    if (error) { onNotice('That action could not be completed. Please try again.'); return false; }
+    if (data?.error) { onNotice(data.error); return false; }
+    return true;
+  }
+  async function suspend(userId: string) { if (await callAdmin({ action: 'suspend', userId })) { onNotice('User suspended.'); void loadAll(); } }
+  async function reactivate(userId: string) { if (await callAdmin({ action: 'reactivate', userId })) { onNotice('User reactivated.'); void loadAll(); } }
+  async function disable(userId: string) { if (await callAdmin({ action: 'disable', userId })) { onNotice('User disabled.'); void loadAll(); } }
+  async function changeRole(userId: string, roleId: string) { if (await callAdmin({ action: 'changeRole', userId, roleId })) { onNotice('Role updated.'); void loadAll(); } }
+
   if (loading) return <Loading />;
   return <>
-    <div className="page-heading"><div><p className="eyebrow">Access control</p><h1>Users & Roles</h1><p className="muted">Manage roles and granular permissions.</p></div></div>
+    <div className="page-heading"><div><p className="eyebrow">Access control</p><h1>Users & Roles</h1><p className="muted">Invite employees, manage account access, and configure role permissions.</p></div><div className="heading-actions"><button className="button primary" onClick={() => setShowInvite(true)}><Plus size={16} /> Invite employee</button></div></div>
+
+    <section className="panel table-panel" style={{ marginBottom: 24 }}>
+      <div className="panel-heading"><div><p className="eyebrow">Directory</p><h3>Staff</h3></div></div>
+      {staff.length === 0 ? <Empty title="No staff yet" text="Invite your first employee to get started." /> : <div className="data-table">{staff.map((person) => {
+        const roleName = person.user_roles?.[0]?.roles?.name ?? '';
+        return <div className="table-row" key={person.id}>
+          <div className="job-icon"><UserCog size={17} /></div>
+          <div><strong>{person.full_name || 'Unnamed'}</strong><span>{person.phone ?? '—'}</span></div>
+          <select value={roleName} onChange={(e) => void changeRole(person.id, e.target.value)} disabled={!person.user_roles?.[0]}>
+            <option value="" disabled>No role</option>
+            {roles.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+          </select>
+          <span className={`status ${statusStyles[person.status] ?? 'bg-slate-100 text-slate-600'}`}>{person.status}</span>
+          <div className="action-buttons">
+            {person.status === 'SUSPENDED' || person.status === 'DISABLED'
+              ? <button className="button secondary small" onClick={() => void reactivate(person.id)}>Reactivate</button>
+              : <button className="button secondary small" onClick={() => void suspend(person.id)}>Suspend</button>}
+            {person.status !== 'DISABLED' && <button className="button secondary small" onClick={() => void disable(person.id)}>Disable</button>}
+          </div>
+        </div>;
+      })}</div>}
+    </section>
+
     {roles.map((role) => <section className="panel" key={role.id} style={{ marginBottom: 16 }}>
       <div className="panel-heading"><div><p className="eyebrow">{role.name}</p><h3>{role.label}</h3></div><span className="status bg-slate-100 text-slate-600">{rolePerms[role.id]?.length ?? 0} permissions</span></div>
       <div className="perm-grid">{permissions.map((p) => <label key={p.id} className="perm-chip"><input type="checkbox" checked={role.name === 'ADMIN' || (rolePerms[role.id]?.includes(p.key) ?? false)} disabled={role.name === 'ADMIN'} onChange={() => void togglePerm(role.id, p.key)} />{p.key}</label>)}</div>
     </section>)}
+
+    {showInvite && <InviteEmployeeForm roles={roles} onClose={() => setShowInvite(false)} onSaved={(m) => { setShowInvite(false); onNotice(m); void loadAll(); }} />}
   </>;
+}
+
+function InviteEmployeeForm({ roles, onClose, onSaved }: { roles: Role[]; onClose: () => void; onSaved: (m: string) => void }) {
+  const [fullName, setFullName] = useState(''); const [email, setEmail] = useState(''); const [phone, setPhone] = useState(''); const [roleId, setRoleId] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true); setError('');
+    const { data, error: invokeError } = await supabase.functions.invoke('admin-users', {
+      body: { action: 'invite', email: email.trim().toLowerCase(), fullName, phone: phone || null, roleId },
+    });
+    setBusy(false);
+    if (invokeError || data?.error) { setError(data?.error ?? 'Unable to send invitation. Please try again.'); return; }
+    onSaved(`Invitation sent to ${email}.`);
+  }
+
+  return <Modal title="Invite employee" onClose={onClose}><form onSubmit={submit} className="modal-form">
+    <label>Full name<input value={fullName} onChange={(e) => setFullName(e.target.value)} required placeholder="e.g. Grace Wanjiru" /></label>
+    <label>Work email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="grace@oaklandmotors.co.ke" /></label>
+    <label>Phone <span className="optional">Optional</span><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0712 345 678" /></label>
+    <label>Role<select value={roleId} onChange={(e) => setRoleId(e.target.value)} required><option value="">Select role...</option>{roles.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select></label>
+    {error && <div className="form-error">{error}</div>}
+    <button className="button primary wide" disabled={busy}>{busy ? 'Sending invitation...' : 'Send invitation'} <ArrowUpRight size={16} /></button>
+  </form></Modal>;
 }
 
 // === SHARED COMPONENTS ===

@@ -8,7 +8,7 @@ export const PERMISSIONS = [
   'quotation.view','quotation.create','quotation.approve','quotation.reject',
   'invoice.view','invoice.create','invoice.update','invoice.void',
   'payment.view','payment.create','payment.reverse',
-  'report.view','report.export','audit.view','settings.manage',
+  'report.view','report.export','audit.view','settings.manage','users.manage',
 ] as const;
 
 export type PermissionKey = typeof PERMISSIONS[number];
@@ -40,6 +40,8 @@ export const JOB_TRANSITIONS: Record<string, string[]> = {
   CANCELLED: [],
 };
 
+export const ACCOUNT_STATUSES = ['INVITED','ACTIVE','SUSPENDED','DISABLED'] as const;
+
 export const PAYMENT_METHODS = ['CASH','MPESA','BANK','CARD','OTHER'] as const;
 
 export const MOVEMENT_TYPES = ['OPENING_BALANCE','PURCHASE','JOB_CARD_USAGE','RETURN','ADJUSTMENT_IN','ADJUSTMENT_OUT','DAMAGE','TRANSFER'] as const;
@@ -69,4 +71,7 @@ export const statusStyles: Record<string, string> = {
   VOID: 'bg-slate-100 text-slate-500',
   ACTIVE: 'bg-emerald-50 text-emerald-700',
   ARCHIVED: 'bg-slate-100 text-slate-500',
+  INVITED: 'bg-sky-50 text-sky-700',
+  SUSPENDED: 'bg-amber-50 text-amber-700',
+  DISABLED: 'bg-red-50 text-red-700',
 };

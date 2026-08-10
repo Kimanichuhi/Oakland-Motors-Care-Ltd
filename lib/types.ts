@@ -272,4 +272,7 @@ export type Profile = {
   phone: string | null;
   job_title: string | null;
   avatar_url: string | null;
+  status: 'INVITED' | 'ACTIVE' | 'SUSPENDED' | 'DISABLED';
+  invited_at: string | null;
+  activated_at: string | null;
 };

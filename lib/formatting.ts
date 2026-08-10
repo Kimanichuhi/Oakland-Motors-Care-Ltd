@@ -30,12 +30,12 @@ export function computeLineTotal(quantity: number, unitPriceMinor: number, taxRa
   return base + tax;
 }
 
-export function computeTotals(items: { line_total_minor: number }[], discountMinor: number) {
-  const subtotal = items.reduce((sum, item) => sum + item.line_total_minor, 0);
+export function computeTotals(items: { quantity: number; unit_price_minor: number; tax_rate: number }[], discountMinor: number) {
+  const subtotal = items.reduce((sum, item) => sum + Math.round(item.quantity * item.unit_price_minor), 0);
   const tax = items.reduce((sum, item) => {
-    const base = item.line_total_minor;
-    return sum + Math.round(base * 0);
+    const base = Math.round(item.quantity * item.unit_price_minor);
+    return sum + Math.round(base * (item.tax_rate / 100));
   }, 0);
-  const total = subtotal - discountMinor;
+  const total = subtotal + tax - discountMinor;
   return { subtotal_minor: subtotal, discount_minor: discountMinor, tax_minor: tax, total_minor: Math.max(0, total) };
 }
