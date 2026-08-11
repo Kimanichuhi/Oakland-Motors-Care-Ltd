@@ -3,11 +3,11 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatKes, formatDate, formatDateTime, computeLineTotal } from '@/lib/formatting';
-import { statusStyles, JOB_TRANSITIONS, PAYMENT_METHODS } from '@/lib/constants';
+import { statusStyles, JOB_TRANSITIONS, PAYMENT_METHODS, JOB_TYPE_META, INSPECTION_CATEGORIES, INSPECTION_CONDITIONS, WORK_ITEM_STATUSES, QUALITY_CHECK_ITEMS, QUALITY_CHECK_RESULTS, SIGNOFF_ROLES } from '@/lib/constants';
 import { loadUserPermissions, hasPermission, clearPermissionCache, type UserPermission } from '@/lib/permissions';
-import type { Customer, Vehicle, Service, Part, Supplier, JobCard, JobCardLabour, JobCardPart, JobCardStatusHistory, Invoice, InvoiceItem, Payment, Quotation, QuotationItem, PurchaseOrder, PurchaseOrderItem, StockMovement, Employee, Notification, AuditLog, BusinessSettings, Role, Permission, Profile } from '@/lib/types';
+import type { Customer, Vehicle, Service, Part, Supplier, JobCard, JobCardLabour, JobCardPart, JobCardStatusHistory, JobCardInspectionItem, JobCardWorkItem, JobCardDiagnosis, JobCardQualityCheck, JobCardSignoff, Invoice, InvoiceItem, Payment, Quotation, QuotationItem, PurchaseOrder, PurchaseOrderItem, StockMovement, Employee, Notification, AuditLog, BusinessSettings, Role, Permission, Profile } from '@/lib/types';
 import {
-  ArrowUpRight, Bell, CarFront, CheckCircle2, ChevronDown, CircleDollarSign, ClipboardList, Gauge,
+  ArrowUpRight, Bell, CarFront, CheckCircle2, CircleDollarSign, ClipboardList, Gauge,
   LayoutDashboard, LogOut, Menu, Package, Plus, Search, Settings, ShieldCheck, Sparkles, Users,
   Wrench, X, FileText, Truck, ShoppingCart, Receipt, ScrollText, UserCog, AlertTriangle,
   TrendingUp, Download, Eye, Edit, Archive, Trash2, Phone, Mail, MapPin, Filter, ChevronRight,
@@ -128,7 +128,6 @@ export default function Home() {
     {showMobileNav && <div className="nav-overlay" onClick={() => setShowMobileNav(false)} />}
     <aside className={`sidebar ${showMobileNav ? 'open' : ''}`}>
       <div className="brand"><div className="brand-mark">OM</div><div><strong>Oakland Motor</strong><span>Care Ltd</span></div></div>
-      <div className="branch-pill"><span className={online ? 'online-dot' : 'offline-dot'} /> Nairobi workshop <ChevronDown size={14} /></div>
       <nav className="nav-list">
         {visibleNav.map((group, gi) => <div key={gi} className="nav-group">
           {group.label && <p className="nav-label">{group.label}</p>}
@@ -321,9 +320,9 @@ function DashboardSection({ onNewJob, onNewCustomer }: { onNewJob: () => void; o
       ]);
       const jobData = (jobs.data ?? []) as (JobCard & { vehicles: { registration_number: string } | null, customers: { full_name: string } | null })[];
       setRecentJobs(jobData.slice(0, 6));
-      const active = jobData.filter((j) => !['COMPLETED','DELIVERED','CANCELLED'].includes(j.status));
-      const completedToday = jobData.filter((j) => j.status === 'COMPLETED' && j.created_at.slice(0, 10) === today);
-      const ready = jobData.filter((j) => j.status === 'READY_FOR_PICKUP');
+      const active = jobData.filter((j) => !['COLLECTED','CLOSED','CANCELLED'].includes(j.status));
+      const completedToday = jobData.filter((j) => j.status === 'QUALITY_CHECK' && j.created_at.slice(0, 10) === today);
+      const ready = jobData.filter((j) => j.status === 'READY_FOR_COLLECTION');
       const lowStock = (parts.data ?? []).filter((p) => p.quantity_on_hand <= p.reorder_level);
       const outstanding = (invoices.data ?? []).reduce((s, inv) => s + (inv.total_minor - inv.amount_paid_minor), 0);
       setStats({ activeJobs: active.length, completedToday: completedToday.length, readyJobs: ready.length, customers: customers.count ?? 0, vehicles: vehicles.count ?? 0, lowStock: lowStock.length, outstandingInvoices: outstanding, todayRevenue: 0, pendingQuotes: quotations.count ?? 0 });
@@ -448,16 +447,16 @@ function VehiclesSection({ query, onSelect }: { query: string; onSelect: (id: st
 
 function VehicleDetail({ id, onBack, onNewJob }: { id: string; onBack: () => void; onNewJob: () => void }) {
   const [vehicle, setVehicle] = useState<(Vehicle & { customers: Customer | null }) | null>(null);
-  const [jobs, setJobs] = useState<(JobCard & { job_card_labour: JobCardLabour[]; job_card_parts: JobCardPart[] })[]>([]);
+  const [jobs, setJobs] = useState<(JobCard & { job_card_labour: JobCardLabour[]; job_card_parts: JobCardPart[]; job_card_diagnosis: JobCardDiagnosis[] })[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   useEffect(() => {
     (async () => {
       const [v, j, i] = await Promise.all([
         supabase.from('vehicles').select('*, customers(*)').eq('id', id).maybeSingle(),
-        supabase.from('job_cards').select('*, job_card_labour(*), job_card_parts(*)').eq('vehicle_id', id).is('deleted_at', null).order('created_at', { ascending: false }),
+        supabase.from('job_cards').select('*, job_card_labour(*), job_card_parts(*), job_card_diagnosis(findings, created_at)').eq('vehicle_id', id).is('deleted_at', null).order('created_at', { ascending: false }),
         supabase.from('invoices').select('*').eq('vehicle_id', id).order('created_at', { ascending: false }),
       ]);
-      setVehicle(v.data as (Vehicle & { customers: Customer | null }) | null); setJobs((j.data ?? []) as (JobCard & { job_card_labour: JobCardLabour[]; job_card_parts: JobCardPart[] })[]); setInvoices((i.data ?? []) as Invoice[]);
+      setVehicle(v.data as (Vehicle & { customers: Customer | null }) | null); setJobs((j.data ?? []) as (JobCard & { job_card_labour: JobCardLabour[]; job_card_parts: JobCardPart[]; job_card_diagnosis: JobCardDiagnosis[] })[]); setInvoices((i.data ?? []) as Invoice[]);
     })();
   }, [id]);
   if (!vehicle) return <Loading />;
@@ -481,7 +480,7 @@ function VehicleDetail({ id, onBack, onNewJob }: { id: string; onBack: () => voi
           <div className="timeline-header"><strong>{job.job_number}</strong><span className={`status ${statusStyles[job.status] ?? ''}`}>{job.status.replaceAll('_', ' ')}</span></div>
           <p className="muted">{formatDate(job.created_at)} · {job.mileage.toLocaleString()} KM</p>
           <p>{job.complaint}</p>
-          {job.diagnosis && <p className="timeline-diagnosis"><strong>Diagnosis:</strong> {job.diagnosis}</p>}
+          {job.job_card_diagnosis?.[0] && <p className="timeline-diagnosis"><strong>Diagnosis:</strong> {job.job_card_diagnosis[0].findings}</p>}
           <div className="timeline-meta"><span>{job.job_card_labour?.length ?? 0} labour items</span><span>{job.job_card_parts?.length ?? 0} parts</span></div>
         </div>
       </div>)}</div>}
@@ -490,43 +489,87 @@ function VehicleDetail({ id, onBack, onNewJob }: { id: string; onBack: () => voi
 }
 
 // === JOB CARDS ===
+const JOB_STATUS_BUCKETS: { key: string; label: string; statuses: string[] }[] = [
+  { key: 'ACTIVE', label: 'In progress', statuses: ['RECEIVED', 'INSPECTION', 'DIAGNOSIS', 'WAITING_FOR_PARTS', 'IN_PROGRESS'] },
+  { key: 'APPROVAL', label: 'Awaiting approval', statuses: ['AWAITING_APPROVAL', 'APPROVED'] },
+  { key: 'QC', label: 'Quality check', statuses: ['QUALITY_CHECK'] },
+  { key: 'READY', label: 'Ready for collection', statuses: ['READY_FOR_COLLECTION'] },
+  { key: 'DONE', label: 'Completed', statuses: ['COLLECTED', 'CLOSED'] },
+  { key: 'CANCELLED', label: 'Cancelled', statuses: ['CANCELLED'] },
+];
+
 function JobsSection({ query, onNew, onSelect }: { query: string; onNew: () => void; onSelect: (id: string) => void }) {
   const [jobs, setJobs] = useState<(JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [bucketFilter, setBucketFilter] = useState<string | null>(null);
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
+  useEffect(() => {
+    supabase.from('job_cards').select('status').is('deleted_at', null).then(({ data }) => {
+      const counts: Record<string, number> = {};
+      for (const row of (data ?? []) as { status: string }[]) counts[row.status] = (counts[row.status] ?? 0) + 1;
+      setStatusCounts(counts);
+    });
+  }, [jobs.length]);
   useEffect(() => {
     (async () => {
       let q = supabase.from('job_cards').select('*, vehicles(registration_number), customers(full_name)').is('deleted_at', null).order('created_at', { ascending: false });
-      if (statusFilter !== 'ALL') q = q.eq('status', statusFilter);
+      if (bucketFilter) q = q.in('status', JOB_STATUS_BUCKETS.find((b) => b.key === bucketFilter)?.statuses ?? []);
+      else if (statusFilter !== 'ALL') q = q.eq('status', statusFilter);
       if (query) q = q.or(`job_number.ilike.%${query}%,complaint.ilike.%${query}%`);
       const { data } = await q.limit(100);
       setJobs((data ?? []) as (JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[]); setLoading(false);
     })();
-  }, [query, statusFilter]);
+  }, [query, statusFilter, bucketFilter]);
   return <SectionPanel eyebrow="Workshop execution" title="Job Cards" onNew={onNew} newLabel="New job card">
-    <div className="filter-bar"><Filter size={15} /><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="ALL">All statuses</option>{Object.keys(JOB_TRANSITIONS).map((s) => <option key={s} value={s}>{s.replaceAll('_', ' ')}</option>)}</select></div>
+    <div className="metric-grid" style={{ marginBottom: 20 }}>{JOB_STATUS_BUCKETS.map((b) => {
+      const count = b.statuses.reduce((s, st) => s + (statusCounts[st] ?? 0), 0);
+      return <button key={b.key} className="metric-card" style={{ textAlign: 'left', cursor: 'pointer', outline: bucketFilter === b.key ? '2px solid var(--gold)' : 'none' }} onClick={() => { setBucketFilter(bucketFilter === b.key ? null : b.key); setStatusFilter('ALL'); }}>
+        <div className="metric-copy"><span>{b.label}</span><strong>{count}</strong></div>
+      </button>;
+    })}</div>
+    <div className="filter-bar"><Filter size={15} /><select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setBucketFilter(null); }}><option value="ALL">All statuses</option>{Object.keys(JOB_TRANSITIONS).map((s) => <option key={s} value={s}>{s.replaceAll('_', ' ')}</option>)}</select>{bucketFilter && <button className="text-button" onClick={() => setBucketFilter(null)}>Clear filter</button>}</div>
     {loading ? <Loading /> : jobs.length === 0 ? <Empty title="No active job cards" text="Create a job card when a vehicle arrives." /> : <div className="data-table">{jobs.map((j) => <div className="table-row clickable" key={j.id} onClick={() => onSelect(j.id)}><div className="job-icon"><Wrench size={17} /></div><div><strong>{j.job_number}</strong><span>{j.vehicles?.registration_number ?? 'Vehicle'} · {j.customers?.full_name ?? 'Customer'}</span></div><span className="table-muted">{j.complaint}</span><span className={`status ${statusStyles[j.status] ?? ''}`}>{j.status.replaceAll('_', ' ')}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
   </SectionPanel>;
 }
 
+type JobDetailData = JobCard & {
+  vehicles: Vehicle | null; customers: Customer | null;
+  job_card_labour: JobCardLabour[];
+  job_card_parts: (JobCardPart & { parts: Part | null })[];
+  job_card_status_history: JobCardStatusHistory[];
+  job_card_inspection_items: JobCardInspectionItem[];
+  job_card_work_items: JobCardWorkItem[];
+  job_card_diagnosis: JobCardDiagnosis[];
+  job_card_quality_checks: JobCardQualityCheck[];
+  job_card_signoffs: JobCardSignoff[];
+  invoices: (Invoice & { payments: Payment[] })[];
+};
+const JOB_DETAIL_SELECT = '*, vehicles(*), customers(*), job_card_labour(*), job_card_parts(*, parts(*)), job_card_status_history(*), job_card_inspection_items(*), job_card_work_items(*), job_card_diagnosis(*), job_card_quality_checks(*), job_card_signoffs(*), invoices(*, payments(*))';
+
 function JobDetail({ id, onBack, can, onNotice, onRefresh, onNewQuotation, onNewInvoice }: { id: string; onBack: () => void; can: (p: string) => boolean; onNotice: (m: string) => void; onRefresh: () => void; onNewQuotation: () => void; onNewInvoice: () => void }) {
-  const [job, setJob] = useState<(JobCard & { vehicles: Vehicle | null; customers: Customer | null; job_card_labour: JobCardLabour[]; job_card_parts: (JobCardPart & { parts: Part | null })[]; job_card_status_history: JobCardStatusHistory[] }) | null>(null);
+  const [job, setJob] = useState<JobDetailData | null>(null);
   const [labourDesc, setLabourDesc] = useState(''); const [labourPrice, setLabourPrice] = useState('0');
   const [partId, setPartId] = useState(''); const [partQty, setPartQty] = useState('1');
   const [parts, setParts] = useState<Part[]>([]);
-  const [diagnosis, setDiagnosis] = useState('');
   const [showAssign, setShowAssign] = useState(false);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [inspectionDraft, setInspectionDraft] = useState<Record<string, { condition: string; notes: string }>>({});
+  const [workDesc, setWorkDesc] = useState(''); const [workPriority, setWorkPriority] = useState<'LOW' | 'NORMAL' | 'HIGH' | 'URGENT'>('NORMAL'); const [workTechnician, setWorkTechnician] = useState('');
+  const [diagFindings, setDiagFindings] = useState(''); const [diagFaultCodes, setDiagFaultCodes] = useState(''); const [diagObservations, setDiagObservations] = useState(''); const [diagRecommended, setDiagRecommended] = useState('');
+  const [qcChecklist, setQcChecklist] = useState<Record<string, boolean>>({}); const [qcResult, setQcResult] = useState<'PASSED' | 'FAILED' | 'REWORK_REQUIRED'>('PASSED'); const [qcNotes, setQcNotes] = useState('');
+  const [signoffName, setSignoffName] = useState<Record<string, string>>({});
+  const [showPrint, setShowPrint] = useState(false);
 
   useEffect(() => {
     (async () => {
       const [j, p, emps] = await Promise.all([
-        supabase.from('job_cards').select('*, vehicles(*), customers(*), job_card_labour(*), job_card_parts(*, parts(*)), job_card_status_history(*)').eq('id', id).maybeSingle(),
+        supabase.from('job_cards').select(JOB_DETAIL_SELECT).eq('id', id).maybeSingle(),
         supabase.from('parts').select('*').eq('active', true).order('name').limit(200),
         supabase.from('employees').select('*').eq('active', true).eq('role', 'TECHNICIAN'),
       ]);
-      setJob(j.data as (JobCard & { vehicles: Vehicle | null; customers: Customer | null; job_card_labour: JobCardLabour[]; job_card_parts: (JobCardPart & { parts: Part | null })[]; job_card_status_history: JobCardStatusHistory[] }) | null);
-      setParts((p.data ?? []) as Part[]); setEmployees((emps.data ?? []) as Employee[]); setDiagnosis(j.data?.diagnosis ?? '');
+      setJob(j.data as JobDetailData | null);
+      setParts((p.data ?? []) as Part[]); setEmployees((emps.data ?? []) as Employee[]);
     })();
   }, [id]);
 
@@ -547,15 +590,9 @@ function JobDetail({ id, onBack, can, onNotice, onRefresh, onNewQuotation, onNew
     setPartId(''); setPartQty('1'); onNotice('Part issued and stock updated.'); onRefresh(); reload();
   }
 
-  async function saveDiagnosis() {
-    if (!job) return;
-    const { error } = await supabase.from('job_cards').update({ diagnosis }).eq('id', id);
-    onNotice(error ? 'Unable to save diagnosis.' : 'Diagnosis saved.'); reload();
-  }
-
   async function changeStatus(newStatus: string) {
     const { error } = await supabase.rpc('transition_job_status', { p_job_card_id: id, p_new_status: newStatus });
-    onNotice(error ? (error.message.includes('Invalid') ? 'That status change is not allowed.' : 'Unable to change status.') : `Job moved to ${newStatus.replaceAll('_', ' ')}.`);
+    onNotice(error ? (error.message.includes('Invalid') ? 'That status change is not allowed.' : error.message) : `Job moved to ${newStatus.replaceAll('_', ' ')}.`);
     onRefresh(); reload();
   }
 
@@ -564,15 +601,63 @@ function JobDetail({ id, onBack, can, onNotice, onRefresh, onNewQuotation, onNew
     onNotice(error ? 'Unable to assign technician.' : 'Technician assigned.'); setShowAssign(false); reload();
   }
 
+  async function saveInspection(category: string) {
+    const existing = job?.job_card_inspection_items.find((i) => i.category === category);
+    const draft = inspectionDraft[category] ?? { condition: existing?.condition ?? 'NOT_CHECKED', notes: existing?.notes ?? '' };
+    const { error } = await supabase.from('job_card_inspection_items').upsert({ job_card_id: id, category, condition: draft.condition, notes: draft.notes || null }, { onConflict: 'job_card_id,category' });
+    onNotice(error ? 'Unable to save inspection item.' : 'Inspection updated.'); reload();
+  }
+
+  async function addWorkItem(e: FormEvent) {
+    e.preventDefault();
+    const { error } = await supabase.from('job_card_work_items').insert({ job_card_id: id, description: workDesc, priority: workPriority, assigned_technician_id: workTechnician || null });
+    if (error) { onNotice('Unable to add work item.'); return; }
+    setWorkDesc(''); setWorkPriority('NORMAL'); setWorkTechnician(''); onNotice('Work item added.'); reload();
+  }
+
+  async function updateWorkItemStatus(itemId: string, status: string) {
+    const { error } = await supabase.from('job_card_work_items').update({ status }).eq('id', itemId);
+    onNotice(error ? 'Unable to update work item.' : 'Work item updated.'); reload();
+  }
+
+  async function addDiagnosis(e: FormEvent) {
+    e.preventDefault();
+    const { error } = await supabase.from('job_card_diagnosis').insert({ job_card_id: id, findings: diagFindings, fault_codes: diagFaultCodes || null, observations: diagObservations || null, recommended_repairs: diagRecommended || null });
+    if (error) { onNotice('Unable to save diagnosis.'); return; }
+    setDiagFindings(''); setDiagFaultCodes(''); setDiagObservations(''); setDiagRecommended(''); onNotice('Diagnosis added.'); reload();
+  }
+
+  async function submitQualityCheck(e: FormEvent) {
+    e.preventDefault();
+    const { error } = await supabase.from('job_card_quality_checks').insert({ job_card_id: id, checklist: qcChecklist, result: qcResult, notes: qcNotes || null });
+    onNotice(error ? 'Unable to save quality check.' : 'Quality check recorded.'); reload();
+  }
+
+  async function recordSignoff(role: string) {
+    const name = signoffName[role];
+    if (!name) return;
+    const { error } = await supabase.from('job_card_signoffs').insert({ job_card_id: id, role, name });
+    onNotice(error ? 'Unable to record sign-off.' : 'Sign-off recorded.'); reload();
+  }
+
   async function reload() {
-    const { data } = await supabase.from('job_cards').select('*, vehicles(*), customers(*), job_card_labour(*), job_card_parts(*, parts(*)), job_card_status_history(*)').eq('id', id).maybeSingle();
-    setJob(data as typeof job);
+    const { data } = await supabase.from('job_cards').select(JOB_DETAIL_SELECT).eq('id', id).maybeSingle();
+    setJob(data as JobDetailData | null);
   }
 
   if (!job) return <Loading />;
   const transitions = JOB_TRANSITIONS[job.status] ?? [];
   const labourTotal = (job.job_card_labour ?? []).reduce((s, l) => s + computeLineTotal(l.quantity, l.unit_price_minor, l.tax_rate), 0);
   const partsTotal = (job.job_card_parts ?? []).reduce((s, p) => s + computeLineTotal(p.quantity, p.unit_price_minor, 16), 0);
+  const diagnosisEntries = [...(job.job_card_diagnosis ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const workItems = [...(job.job_card_work_items ?? [])].sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at));
+  const passedQualityCheck = job.job_card_quality_checks?.find((q) => q.result === 'PASSED');
+  const timelineEvents: { id: string; at: string; title: string; detail?: string }[] = [
+    ...(job.job_card_status_history ?? []).map((h) => ({ id: `status-${h.id}`, at: h.changed_at, title: `Status: ${h.to_status.replaceAll('_', ' ')}`, detail: h.from_status ? `From ${h.from_status.replaceAll('_', ' ')}` : undefined })),
+    ...(job.job_card_diagnosis ?? []).map((d) => ({ id: `diag-${d.id}`, at: d.created_at, title: 'Diagnosis recorded', detail: d.findings })),
+    ...(job.job_card_quality_checks ?? []).map((q) => ({ id: `qc-${q.id}`, at: q.checked_at, title: `Quality check: ${q.result.replaceAll('_', ' ')}`, detail: q.notes ?? undefined })),
+    ...(job.job_card_signoffs ?? []).map((s) => ({ id: `signoff-${s.id}`, at: s.signed_at, title: `Sign-off: ${s.role.replaceAll('_', ' ')}`, detail: s.name })),
+  ].sort((a, b) => b.at.localeCompare(a.at));
 
   return <>
     <BackBar onBack={onBack} label="Job Cards" />
@@ -584,21 +669,66 @@ function JobDetail({ id, onBack, can, onNotice, onRefresh, onNewQuotation, onNew
     <div className="detail-info-grid">
       <div className="info-card"><Clock size={16} /> <div><span>Priority</span><strong>{job.priority}</strong></div></div>
       <div className="info-card"><Calendar size={16} /> <div><span>Created</span><strong>{formatDate(job.created_at)}</strong></div></div>
-      {job.estimated_completion_date && <div className="info-card"><CheckCircle2 size={16} /> <div><span>Est. completion</span><strong>{formatDate(job.estimated_completion_date)}</strong></div></div>}
+      {job.job_types.length > 0 && <div className="info-card"><Wrench size={16} /> <div><span>Job type</span><strong>{job.job_types.map((t) => t.replaceAll('_', ' ')).join(', ')}</strong></div></div>}
+      {job.promised_at && <div className="info-card"><CheckCircle2 size={16} /> <div><span>Promised</span><strong>{formatDate(job.promised_at)}</strong></div></div>}
+      {job.received_at && <div className="info-card"><Clock size={16} /> <div><span>Received</span><strong>{formatDateTime(job.received_at)}</strong></div></div>}
+      {job.released_at && <div className="info-card"><Clock size={16} /> <div><span>Released</span><strong>{formatDateTime(job.released_at)}</strong></div></div>}
     </div>
     {transitions.length > 0 && can('job.update') && <div className="status-actions"><strong>Move to:</strong>{transitions.map((s) => <button key={s} className="button secondary small" onClick={() => void changeStatus(s)}>{s.replaceAll('_', ' ')}</button>)}</div>}
-    <div className="dashboard-grid" style={{ marginTop: 20 }}>
-      <section className="panel">
-        <div className="panel-heading"><div><p className="eyebrow">Customer complaint</p><h3>Complaint</h3></div></div>
-        <p>{job.complaint}</p>
-        {job.requested_service && <p className="muted">Requested: {job.requested_service}</p>}
-      </section>
-      <section className="panel">
-        <div className="panel-heading"><div><p className="eyebrow">Technical</p><h3>Diagnosis</h3></div>{can('job.update') && <button className="text-button" onClick={() => void saveDiagnosis()}>Save</button>}</div>
-        <textarea value={diagnosis} onChange={(e) => setDiagnosis(e.target.value)} placeholder="Enter diagnosis..." className="diagnosis-input" />
-        {job.recommended_work && <p className="muted">Recommended: {job.recommended_work}</p>}
-      </section>
-    </div>
+
+    <section className="panel" style={{ marginTop: 20 }}>
+      <div className="panel-heading"><div><p className="eyebrow">Customer complaint</p><h3>Reason for visit</h3></div></div>
+      <p>{job.complaint}</p>
+      {job.requested_service && <p className="muted">Requested: {job.requested_service}</p>}
+      {job.recommended_work && <p className="muted">Recommended: {job.recommended_work}</p>}
+    </section>
+
+    <section className="panel" style={{ marginTop: 20 }}>
+      <div className="panel-heading"><div><p className="eyebrow">Vehicle condition on arrival</p><h3>Inspection checklist</h3></div></div>
+      <div className="data-table">{INSPECTION_CATEGORIES.map((category) => {
+        const existing = job.job_card_inspection_items.find((i) => i.category === category);
+        const draft = inspectionDraft[category] ?? { condition: existing?.condition ?? 'NOT_CHECKED', notes: existing?.notes ?? '' };
+        return <div className="table-row" key={category}>
+          <div><strong>{category.replaceAll('_', ' ')}</strong>{existing && <span className={`status ${statusStyles[existing.condition] ?? ''}`}>{existing.condition.replaceAll('_', ' ')}</span>}</div>
+          {can('job.update') ? <>
+            <select value={draft.condition} onChange={(e) => setInspectionDraft((prev) => ({ ...prev, [category]: { ...draft, condition: e.target.value } }))}>
+              {INSPECTION_CONDITIONS.map((c) => <option key={c} value={c}>{c.replaceAll('_', ' ')}</option>)}
+            </select>
+            <input value={draft.notes} onChange={(e) => setInspectionDraft((prev) => ({ ...prev, [category]: { ...draft, notes: e.target.value } }))} placeholder="Notes" />
+            <button className="button secondary small" onClick={() => void saveInspection(category)}>Save</button>
+          </> : <span className="muted">{existing?.notes ?? '—'}</span>}
+        </div>;
+      })}</div>
+    </section>
+
+    <section className="panel" style={{ marginTop: 20 }}>
+      <div className="panel-heading"><div><p className="eyebrow">Technical</p><h3>Diagnosis</h3></div></div>
+      {diagnosisEntries.length === 0 ? <Empty title="No diagnosis yet" text="Add diagnostic findings below." /> : <div className="data-table">{diagnosisEntries.map((d) => <div className="table-row" key={d.id}><div><strong>{d.findings}</strong>{d.fault_codes && <span>Fault codes: {d.fault_codes}</span>}{d.observations && <span>{d.observations}</span>}{d.recommended_repairs && <span>Recommended: {d.recommended_repairs}</span>}</div><span className="table-muted">{formatDateTime(d.created_at)}</span></div>)}</div>}
+      {can('job.update') && <form onSubmit={addDiagnosis} className="modal-form" style={{ marginTop: 14 }}>
+        <label>Findings<textarea value={diagFindings} onChange={(e) => setDiagFindings(e.target.value)} required placeholder="Diagnostic findings..." /></label>
+        <div className="form-row">
+          <label>Fault codes <span className="optional">Optional</span><input value={diagFaultCodes} onChange={(e) => setDiagFaultCodes(e.target.value)} /></label>
+          <label>Observations <span className="optional">Optional</span><input value={diagObservations} onChange={(e) => setDiagObservations(e.target.value)} /></label>
+        </div>
+        <label>Recommended repairs <span className="optional">Optional</span><input value={diagRecommended} onChange={(e) => setDiagRecommended(e.target.value)} /></label>
+        <button className="button secondary small" type="submit">Add diagnosis</button>
+      </form>}
+    </section>
+
+    <section className="panel" style={{ marginTop: 20 }}>
+      <div className="panel-heading"><div><p className="eyebrow">Work to be done</p><h3>Work items</h3></div></div>
+      {workItems.length === 0 ? <Empty title="No work items" text="Add the tasks needed for this job." /> : <div className="data-table">{workItems.map((w) => <div className="table-row" key={w.id}>
+        <div><strong>{w.description}</strong><span>{w.priority} · {employees.find((e) => e.user_id === w.assigned_technician_id)?.full_name ?? 'Unassigned'}</span></div>
+        {can('job.update') ? <select value={w.status} onChange={(e) => void updateWorkItemStatus(w.id, e.target.value)}>{WORK_ITEM_STATUSES.map((s) => <option key={s} value={s}>{s.replaceAll('_', ' ')}</option>)}</select> : <span className={`status ${statusStyles[w.status] ?? ''}`}>{w.status.replaceAll('_', ' ')}</span>}
+      </div>)}</div>}
+      {can('job.update') && <form onSubmit={addWorkItem} className="inline-form">
+        <input value={workDesc} onChange={(e) => setWorkDesc(e.target.value)} placeholder="Work item description" required />
+        <select value={workPriority} onChange={(e) => setWorkPriority(e.target.value as 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT')}><option value="LOW">Low</option><option value="NORMAL">Normal</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select>
+        <select value={workTechnician} onChange={(e) => setWorkTechnician(e.target.value)}><option value="">Unassigned</option>{employees.map((e) => <option key={e.id} value={e.user_id ?? e.id}>{e.full_name}</option>)}</select>
+        <button className="button primary small" type="submit"><Plus size={15} /></button>
+      </form>}
+    </section>
+
     {can('job.assign') && <section className="panel" style={{ marginTop: 20 }}>
       <div className="panel-heading"><div><p className="eyebrow">Team</p><h3>Technician assignment</h3></div><button className="text-button" onClick={() => setShowAssign(!showAssign)}>Assign <Plus size={15} /></button></div>
       {showAssign && <div className="assign-row"><select onChange={(e) => void assignTechnician(e.target.value)} defaultValue=""><option value="">Select technician...</option>{employees.map((e) => <option key={e.id} value={e.user_id ?? e.id}>{e.full_name}</option>)}</select></div>}
@@ -617,21 +747,198 @@ function JobDetail({ id, onBack, can, onNotice, onRefresh, onNewQuotation, onNew
         <div className="total-row"><strong>Parts total</strong><span>{formatKes(partsTotal)}</span></div>
       </section>
     </div>
+
+    <section className="panel" style={{ marginTop: 20 }}>
+      <div className="panel-heading"><div><p className="eyebrow">Before release</p><h3>Quality check</h3></div>{passedQualityCheck && <span className="status bg-emerald-50 text-emerald-700">PASSED</span>}</div>
+      {(job.job_card_quality_checks ?? []).length > 0 && <div className="data-table">{job.job_card_quality_checks.map((q) => <div className="table-row" key={q.id}><div><strong>{q.result.replaceAll('_', ' ')}</strong>{q.notes && <span>{q.notes}</span>}</div><span className="table-muted">{formatDateTime(q.checked_at)}</span></div>)}</div>}
+      {job.status === 'QUALITY_CHECK' && can('job.complete') && <form onSubmit={submitQualityCheck} className="modal-form" style={{ marginTop: 14 }}>
+        <div className="perm-grid">{QUALITY_CHECK_ITEMS.map((item) => <label key={item.key} className="perm-chip"><input type="checkbox" checked={qcChecklist[item.key] ?? false} onChange={() => setQcChecklist((prev) => ({ ...prev, [item.key]: !prev[item.key] }))} />{item.label}</label>)}</div>
+        <label>Result<select value={qcResult} onChange={(e) => setQcResult(e.target.value as 'PASSED' | 'FAILED' | 'REWORK_REQUIRED')}>{QUALITY_CHECK_RESULTS.map((r) => <option key={r} value={r}>{r.replaceAll('_', ' ')}</option>)}</select></label>
+        <label>Notes <span className="optional">Optional</span><input value={qcNotes} onChange={(e) => setQcNotes(e.target.value)} /></label>
+        <button className="button primary small" type="submit">Record quality check</button>
+      </form>}
+    </section>
+
+    <section className="panel" style={{ marginTop: 20 }}>
+      <div className="panel-heading"><div><p className="eyebrow">Sign-off</p><h3>Advisor · Technician · Quality Check · Customer</h3></div></div>
+      <div className="data-table">{SIGNOFF_ROLES.map((role) => {
+        const existing = job.job_card_signoffs.find((s) => s.role === role);
+        return <div className="table-row" key={role}>
+          <div><strong>{role.replaceAll('_', ' ')}</strong>{existing && <span>{existing.name} · {formatDateTime(existing.signed_at)}</span>}</div>
+          {!existing && can('job.update') && <><input value={signoffName[role] ?? ''} onChange={(e) => setSignoffName((prev) => ({ ...prev, [role]: e.target.value }))} placeholder="Name" /><button className="button secondary small" onClick={() => void recordSignoff(role)}>Record</button></>}
+        </div>;
+      })}</div>
+    </section>
+
+    <section className="panel" style={{ marginTop: 20 }}>
+      <div className="panel-heading"><div><p className="eyebrow">Office use only</p><h3>Invoices &amp; payments</h3></div></div>
+      {(job.invoices ?? []).length === 0 ? <Empty title="No invoice yet" text="Create an invoice once the job is ready for collection." /> : <div className="data-table">{job.invoices.map((inv) => {
+        const balance = inv.total_minor - inv.amount_paid_minor;
+        return <div className="table-row" key={inv.id}>
+          <div>
+            <strong>{inv.invoice_number}</strong>
+            <span>Total {formatKes(inv.total_minor)} · Paid {formatKes(inv.amount_paid_minor)} · Balance {formatKes(balance)}</span>
+            {(inv.payments ?? []).length > 0 && <span className="muted">{[...inv.payments].sort((a, b) => a.paid_at.localeCompare(b.paid_at)).map((p) => `${p.method} ${formatKes(p.amount_minor)}${p.reference ? ` (${p.reference})` : ''} · ${formatDate(p.paid_at)}`).join(' · ')}</span>}
+          </div>
+          <span className={`status ${statusStyles[inv.status] ?? ''}`}>{inv.status.replaceAll('_', ' ')}</span>
+        </div>;
+      })}</div>}
+    </section>
+
     <div className="dashboard-grid" style={{ marginTop: 20 }}>
       <section className="panel">
-        <div className="panel-heading"><div><p className="eyebrow">Traceability</p><h3>Status history</h3></div></div>
-        {(job.job_card_status_history ?? []).length === 0 ? <Empty title="No history" text="Status changes will appear here." /> : <div className="timeline">{[...job.job_card_status_history].reverse().map((h) => <div className="timeline-item" key={h.id}><div className="timeline-dot" /><div className="timeline-content"><div className="timeline-header"><strong>{h.to_status.replaceAll('_', ' ')}</strong><span className="muted">{formatDateTime(h.changed_at)}</span></div>{h.from_status && <p className="muted">From {h.from_status.replaceAll('_', ' ')}</p>}</div></div>)}</div>}
+        <div className="panel-heading"><div><p className="eyebrow">Traceability</p><h3>Digital timeline</h3></div></div>
+        {timelineEvents.length === 0 ? <Empty title="No activity" text="Job activity will appear here." /> : <div className="timeline">{timelineEvents.map((ev) => <div className="timeline-item" key={ev.id}><div className="timeline-dot" /><div className="timeline-content"><div className="timeline-header"><strong>{ev.title}</strong><span className="muted">{formatDateTime(ev.at)}</span></div>{ev.detail && <p className="muted">{ev.detail}</p>}</div></div>)}</div>}
       </section>
       <section className="panel">
         <div className="panel-heading"><div><p className="eyebrow">Billing</p><h3>Financial actions</h3></div></div>
         <div className="action-buttons">
           {can('quotation.create') && <button className="button secondary" onClick={onNewQuotation}><FileText size={16} /> Create quotation</button>}
           {can('invoice.create') && <button className="button secondary" onClick={onNewInvoice}><CircleDollarSign size={16} /> Create invoice</button>}
+          {can('job.view') && <button className="button secondary" onClick={() => setShowPrint(true)}><Printer size={16} /> Print / Preview</button>}
         </div>
         <div className="total-row"><strong>Job total</strong><span>{formatKes(labourTotal + partsTotal)}</span></div>
       </section>
     </div>
+    {showPrint && <JobCardPrintView job={job} labourTotal={labourTotal} partsTotal={partsTotal} onClose={() => setShowPrint(false)} />}
   </>;
+}
+
+// === JOB CARD PRINT / PDF VIEW ===
+type CopyMode = 'CUSTOMER' | 'WORKSHOP' | 'BLANK';
+const COPY_LABELS: Record<CopyMode, string> = { CUSTOMER: 'Customer copy', WORKSHOP: 'Workshop copy', BLANK: 'Blank template' };
+
+function JobCardPrintView({ job, labourTotal, partsTotal, onClose }: { job: JobDetailData; labourTotal: number; partsTotal: number; onClose: () => void }) {
+  const [settings, setSettings] = useState<BusinessSettings | null>(null);
+  const [copyMode, setCopyMode] = useState<CopyMode>('CUSTOMER');
+  useEffect(() => { supabase.from('business_settings').select('*').limit(1).single().then(({ data }) => setSettings(data as BusinessSettings)); }, []);
+
+  const blank = copyMode === 'BLANK';
+  const workshop = copyMode === 'WORKSHOP';
+  const field = (label: string, value: string | null | undefined) => (
+    <div className="print-field"><span>{label}</span>{blank || !value ? <div className="fill-line" /> : <strong>{value}</strong>}</div>
+  );
+
+  return <div className="print-overlay">
+    <div className="print-toolbar no-print">
+      <div className="action-buttons">
+        <button className={`button ${copyMode === 'CUSTOMER' ? 'primary' : 'secondary'} small`} onClick={() => setCopyMode('CUSTOMER')}>Customer copy</button>
+        <button className={`button ${copyMode === 'WORKSHOP' ? 'primary' : 'secondary'} small`} onClick={() => setCopyMode('WORKSHOP')}>Workshop copy</button>
+        <button className={`button ${copyMode === 'BLANK' ? 'primary' : 'secondary'} small`} onClick={() => setCopyMode('BLANK')}>Blank template</button>
+      </div>
+      <div className="action-buttons">
+        <button className="button primary small" onClick={() => window.print()}><Printer size={15} /> Print / Save as PDF</button>
+        <button className="close-button" onClick={onClose}><X size={16} /></button>
+      </div>
+    </div>
+
+    <div id="print-area" className="print-sheet">
+      <div className="print-header">
+        <div>
+          {settings?.logo_url ? <img src={settings.logo_url} alt={settings.business_name} /> : <img src="/logo.png" alt="Oakland Motor Care Ltd" style={{ height: 44 }} />}
+          <h1>{settings?.business_name ?? 'Oakland Motor Care Ltd'}</h1>
+          <p className="muted">{settings?.address ?? ''}</p>
+          <p className="muted">{[settings?.phone, settings?.email].filter(Boolean).join(' · ')}</p>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <span className="print-copy-badge">{COPY_LABELS[copyMode]}</span>
+          <div className="print-field" style={{ marginTop: 10 }}><span>Job card no.</span>{blank ? <div className="fill-line" style={{ width: 160 }} /> : <strong>{job.job_number}</strong>}</div>
+          {!blank && <div className="print-field"><span>Status</span><strong>{job.status.replaceAll('_', ' ')}</strong></div>}
+        </div>
+      </div>
+
+      <section className="print-section">
+        <h4>Customer details</h4>
+        <div className="print-grid">
+          {field('Full name', job.customers?.full_name)}
+          {field('Phone', job.customers?.phone)}
+          {field('Email', job.customers?.email)}
+          {field('Address', job.customers?.address)}
+        </div>
+      </section>
+
+      <section className="print-section">
+        <h4>Vehicle details</h4>
+        <div className="print-grid">
+          {field('Registration no.', job.vehicles?.registration_number)}
+          {field('Make / Model', job.vehicles ? `${job.vehicles.make} ${job.vehicles.model}` : undefined)}
+          {field('Year', job.vehicles?.year ? String(job.vehicles.year) : undefined)}
+          {field('Mileage (KM)', blank ? undefined : job.mileage.toLocaleString())}
+          {field('VIN', job.vehicles?.vin)}
+          {field('Colour', job.vehicles?.colour)}
+        </div>
+      </section>
+
+      <section className="print-section">
+        <h4>Job information</h4>
+        <div className="print-grid">
+          {field('Job type', blank ? undefined : job.job_types.map((t) => t.replaceAll('_', ' ')).join(', '))}
+          {field('Priority', blank ? undefined : job.priority)}
+          {field('Date/time in', job.received_at ? formatDateTime(job.received_at) : undefined)}
+          {field('Promised date', job.promised_at ? formatDate(job.promised_at) : undefined)}
+          {field('Date/time out', job.released_at ? formatDateTime(job.released_at) : undefined)}
+        </div>
+      </section>
+
+      <section className="print-section">
+        <h4>Customer complaint / reason for visit</h4>
+        {blank ? <div className="fill-line" style={{ minHeight: 44 }} /> : <p>{job.complaint}</p>}
+        {!blank && job.requested_service && <p className="muted">Requested: {job.requested_service}</p>}
+      </section>
+
+      <section className="print-section">
+        <h4>Vehicle inspection checklist</h4>
+        <table className="print-table"><thead><tr><th>Category</th><th>Condition</th><th>Notes</th></tr></thead>
+          <tbody>{INSPECTION_CATEGORIES.map((category) => {
+            const existing = job.job_card_inspection_items.find((i) => i.category === category);
+            return <tr key={category}><td>{category.replaceAll('_', ' ')}</td><td>{blank ? '' : (existing?.condition ?? 'NOT CHECKED').replaceAll('_', ' ')}</td><td>{blank ? '' : (existing?.notes ?? '')}</td></tr>;
+          })}</tbody>
+        </table>
+      </section>
+
+      {!blank && (job.job_card_diagnosis ?? []).length > 0 && <section className="print-section">
+        <h4>Diagnosis</h4>
+        {job.job_card_diagnosis.map((d) => <p key={d.id}>{d.findings}{d.recommended_repairs ? ` — Recommended: ${d.recommended_repairs}` : ''}</p>)}
+      </section>}
+
+      {!blank && (job.job_card_work_items ?? []).length > 0 && <section className="print-section">
+        <h4>Work carried out</h4>
+        <table className="print-table"><thead><tr><th>Description</th>{workshop && <th>Assigned to</th>}<th>Status</th></tr></thead>
+          <tbody>{job.job_card_work_items.map((w) => <tr key={w.id}><td>{w.description}</td>{workshop && <td>{w.assigned_technician_id ?? 'Unassigned'}</td>}<td>{w.status.replaceAll('_', ' ')}</td></tr>)}</tbody>
+        </table>
+      </section>}
+
+      {!blank && ((job.job_card_labour ?? []).length > 0 || (job.job_card_parts ?? []).length > 0) && <section className="print-section">
+        <h4>Labour &amp; parts</h4>
+        <table className="print-table"><thead><tr><th>Description</th><th>Qty</th><th>Unit price</th><th>Total</th></tr></thead>
+          <tbody>
+            {job.job_card_labour.map((l) => <tr key={l.id}><td>{l.description}</td><td>{l.quantity}</td><td>{formatKes(l.unit_price_minor)}</td><td>{formatKes(computeLineTotal(l.quantity, l.unit_price_minor, l.tax_rate))}</td></tr>)}
+            {job.job_card_parts.map((p) => <tr key={p.id}><td>{p.parts?.name ?? 'Part'}</td><td>{p.quantity}</td><td>{formatKes(p.unit_price_minor)}</td><td>{formatKes(computeLineTotal(p.quantity, p.unit_price_minor, 16))}</td></tr>)}
+          </tbody>
+        </table>
+        <div className="print-totals"><table><tbody>
+          <tr><td>Labour total</td><td>{formatKes(labourTotal)}</td></tr>
+          <tr><td>Parts total</td><td>{formatKes(partsTotal)}</td></tr>
+          <tr><td><strong>Grand total</strong></td><td><strong>{formatKes(labourTotal + partsTotal)}</strong></td></tr>
+        </tbody></table></div>
+      </section>}
+
+      {workshop && (job.invoices ?? []).length > 0 && <section className="print-section">
+        <h4>Office use only</h4>
+        {job.invoices.map((inv) => <p key={inv.id}>{inv.invoice_number} — {inv.status.replaceAll('_', ' ')} — Total {formatKes(inv.total_minor)}, Paid {formatKes(inv.amount_paid_minor)}, Balance {formatKes(inv.total_minor - inv.amount_paid_minor)}</p>)}
+      </section>}
+
+      <section className="print-section">
+        <h4>Sign-off</h4>
+        <div className="signature-grid">{SIGNOFF_ROLES.map((role) => {
+          const existing = job.job_card_signoffs.find((s) => s.role === role);
+          return <div className="signature-box" key={role}>{blank || !existing ? <div className="fill-line" style={{ minHeight: 30 }} /> : <div>{existing.name}<br />{formatDate(existing.signed_at)}</div>}<span>{role.replaceAll('_', ' ')}</span></div>;
+        })}</div>
+      </section>
+
+      <div className="print-terms">{settings?.job_card_terms ?? ''}</div>
+    </div>
+  </div>;
 }
 
 // === SERVICES ===
@@ -987,7 +1294,7 @@ function SettingsSection({ onNotice }: { onNotice: (m: string) => void }) {
   useEffect(() => { supabase.from('business_settings').select('*').limit(1).single().then(({ data }) => { setSettings(data as BusinessSettings); setLoading(false); }); }, []);
   async function save() {
     if (!settings) return;
-    const { error } = await supabase.from('business_settings').update({ business_name: settings.business_name, address: settings.address, phone: settings.phone, email: settings.email, tax_rate: settings.tax_rate, currency: settings.currency, invoice_prefix: settings.invoice_prefix, quote_prefix: settings.quote_prefix, job_card_prefix: settings.job_card_prefix, receipt_prefix: settings.receipt_prefix }).eq('id', settings.id);
+    const { error } = await supabase.from('business_settings').update({ business_name: settings.business_name, address: settings.address, phone: settings.phone, email: settings.email, tax_rate: settings.tax_rate, currency: settings.currency, invoice_prefix: settings.invoice_prefix, quote_prefix: settings.quote_prefix, job_card_prefix: settings.job_card_prefix, receipt_prefix: settings.receipt_prefix, job_card_terms: settings.job_card_terms }).eq('id', settings.id);
     onNotice(error ? 'Unable to save settings.' : 'Settings saved successfully.');
   }
   if (loading || !settings) return <Loading />;
@@ -1010,6 +1317,9 @@ function SettingsSection({ onNotice }: { onNotice: (m: string) => void }) {
         <label>Job card prefix<input value={settings.job_card_prefix} onChange={(e) => setSettings({ ...settings, job_card_prefix: e.target.value })} /></label>
         <label>Receipt prefix<input value={settings.receipt_prefix} onChange={(e) => setSettings({ ...settings, receipt_prefix: e.target.value })} /></label>
       </div>
+    </section>
+    <section className="panel" style={{ marginTop: 20 }}><div className="panel-heading"><div><p className="eyebrow">Document templates</p><h3>Job card terms &amp; conditions</h3></div></div>
+      <label>Printed on every job card <span className="optional">Shown on Customer and Workshop copies</span><textarea value={settings.job_card_terms} onChange={(e) => setSettings({ ...settings, job_card_terms: e.target.value })} style={{ minHeight: 140 }} /></label>
     </section>
   </>;
 }
@@ -1146,12 +1456,50 @@ function VehicleForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: s
   return <Modal title="Add vehicle" onClose={onClose}><form onSubmit={submit} className="modal-form"><label>Customer<select value={customerId} onChange={(e) => setCustomerId(e.target.value)} required><option value="">Select customer...</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.full_name} · {c.phone}</option>)}</select></label><label>Registration number<input value={regNumber} onChange={(e) => setRegNumber(e.target.value)} required placeholder="KDA 123A" /></label><div className="form-row"><label>Make<input value={make} onChange={(e) => setMake(e.target.value)} required placeholder="Toyota" /></label><label>Model<input value={model} onChange={(e) => setModel(e.target.value)} required placeholder="Hilux" /></label></div><div className="form-row"><label>Year<input type="number" value={year} onChange={(e) => setYear(e.target.value)} placeholder="2020" /></label><label>Mileage<input type="number" value={mileage} onChange={(e) => setMileage(e.target.value)} required min="0" /></label></div><label>VIN <span className="optional">Optional</span><input value={vin} onChange={(e) => setVin(e.target.value)} /></label><div className="form-row"><label>Fuel type<input value={fuelType} onChange={(e) => setFuelType(e.target.value)} placeholder="Diesel" /></label><label>Colour<input value={colour} onChange={(e) => setColour(e.target.value)} placeholder="White" /></label></div><button className="button primary wide" disabled={busy || !customerId}>{busy ? 'Saving...' : 'Save vehicle'} <ArrowUpRight size={16} /></button></form></Modal>;
 }
 
+const JOB_TYPE_ICONS: Record<string, typeof Wrench> = {
+  SERVICE: Wrench, REPAIR: Settings, DIAGNOSTICS: Activity, BODY_WORK: Sparkles,
+  ACCIDENT_REPAIR: AlertTriangle, MAINTENANCE: ClipboardList, AGRICULTURAL_MACHINERY: Truck,
+  TRACTOR_REPAIR: Truck, EQUIPMENT_REPAIR: Package, OTHER: FileText,
+};
+
 function JobForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string) => void }) {
-  const [customerId, setCustomerId] = useState(''); const [vehicleId, setVehicleId] = useState(''); const [complaint, setComplaint] = useState(''); const [priority, setPriority] = useState<'LOW' | 'NORMAL' | 'HIGH' | 'URGENT'>('NORMAL'); const [requestedService, setRequestedService] = useState(''); const [customers, setCustomers] = useState<Customer[]>([]); const [vehicles, setVehicles] = useState<Vehicle[]>([]); const [busy, setBusy] = useState(false);
+  const [customerId, setCustomerId] = useState(''); const [vehicleId, setVehicleId] = useState(''); const [complaint, setComplaint] = useState(''); const [priority, setPriority] = useState<'LOW' | 'NORMAL' | 'HIGH' | 'URGENT'>('NORMAL'); const [requestedService, setRequestedService] = useState(''); const [jobTypes, setJobTypes] = useState<string[]>([]); const [promisedDate, setPromisedDate] = useState(''); const [customers, setCustomers] = useState<Customer[]>([]); const [vehicles, setVehicles] = useState<Vehicle[]>([]); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   useEffect(() => { supabase.from('customers').select('id,full_name,phone').is('deleted_at', null).order('full_name').limit(200).then(({ data }) => setCustomers((data ?? []) as Customer[])); }, []);
-  useEffect(() => { if (customerId) supabase.from('vehicles').select('*').eq('customer_id', customerId).is('deleted_at', null).then(({ data }) => setVehicles((data ?? []) as Vehicle[])); else setVehicles([]); }, [customerId]);
-  async function submit(e: FormEvent) { e.preventDefault(); setBusy(true); const jobNumber = `JC-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`; const { error } = await supabase.from('job_cards').insert({ job_number: jobNumber, customer_id: customerId, vehicle_id: vehicleId, complaint, priority, requested_service: requestedService || null, mileage: vehicles.find((v) => v.id === vehicleId)?.mileage ?? 0 }); setBusy(false); onSaved(error ? 'Unable to create job card. Please try again.' : 'Job card created successfully.'); }
-  return <Modal title="Create job card" onClose={onClose}><form onSubmit={submit} className="modal-form"><label>Customer<select value={customerId} onChange={(e) => setCustomerId(e.target.value)} required><option value="">Select customer...</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.full_name} · {c.phone}</option>)}</select></label><label>Vehicle<select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} required><option value="">Select vehicle...</option>{vehicles.map((v) => <option key={v.id} value={v.id}>{v.registration_number} · {v.make} {v.model}</option>)}</select></label><label>Priority<select value={priority} onChange={(e) => setPriority(e.target.value as 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT')}><option value="LOW">Low</option><option value="NORMAL">Normal</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select></label><label>Requested service<input value={requestedService} onChange={(e) => setRequestedService(e.target.value)} placeholder="e.g. Oil change" /></label><label>Customer complaint<textarea value={complaint} onChange={(e) => setComplaint(e.target.value)} required placeholder="What does the customer need help with?" /></label><button className="button primary wide" disabled={busy || !vehicleId}>{busy ? 'Creating...' : 'Create job card'} <ArrowUpRight size={16} /></button></form></Modal>;
+  useEffect(() => { setVehicleId(''); if (customerId) supabase.from('vehicles').select('*').eq('customer_id', customerId).is('deleted_at', null).then(({ data }) => setVehicles((data ?? []) as Vehicle[])); else setVehicles([]); }, [customerId]);
+  function toggleJobType(type: string) { setJobTypes((prev) => prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]); }
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setError('');
+    const { data: jobNumber, error: numberError } = await supabase.rpc('generate_job_card_number');
+    if (numberError || !jobNumber) { setBusy(false); setError('Unable to generate a job card number. Please try again.'); return; }
+    const { error } = await supabase.from('job_cards').insert({ job_number: jobNumber, customer_id: customerId, vehicle_id: vehicleId, complaint, priority, requested_service: requestedService || null, job_types: jobTypes, promised_at: promisedDate ? new Date(promisedDate).toISOString() : null, mileage: vehicles.find((v) => v.id === vehicleId)?.mileage ?? 0 });
+    setBusy(false);
+    onSaved(error ? 'Unable to create job card. Please try again.' : `Job card ${jobNumber} created successfully.`);
+  }
+  return <Modal title="Create job card" onClose={onClose}>
+    <form onSubmit={submit} className="modal-form">
+      <label>Customer<CustomerPicker customers={customers} customerId={customerId} onSelect={setCustomerId} onCreated={(c) => { setCustomers((prev) => [...prev, c]); setCustomerId(c.id); }} /></label>
+      <label>Vehicle<VehiclePicker customerId={customerId} vehicles={vehicles} vehicleId={vehicleId} onSelect={setVehicleId} onCreated={(v) => { setVehicles((prev) => [...prev, v]); setVehicleId(v.id); }} /></label>
+      <label>Job type(s) <span className="optional">Optional</span>
+        <div className="job-type-grid">{JOB_TYPE_META.map((t) => {
+          const Icon = JOB_TYPE_ICONS[t.key] ?? Wrench;
+          const active = jobTypes.includes(t.key);
+          return <button type="button" key={t.key} className={`job-type-card${active ? ' selected' : ''}`} onClick={() => toggleJobType(t.key)}>
+            <Icon size={18} />
+            <div><strong>{t.label}</strong><span>{t.description}</span></div>
+            {active && <CheckCircle2 size={16} className="job-type-check" />}
+          </button>;
+        })}</div>
+      </label>
+      <div className="form-row">
+        <label>Priority<select value={priority} onChange={(e) => setPriority(e.target.value as 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT')}><option value="LOW">Low</option><option value="NORMAL">Normal</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select></label>
+        <label>Promised date <span className="optional">Optional</span><input type="date" value={promisedDate} onChange={(e) => setPromisedDate(e.target.value)} /></label>
+      </div>
+      <label>Requested service<input value={requestedService} onChange={(e) => setRequestedService(e.target.value)} placeholder="e.g. Oil change" /></label>
+      <label>Customer complaint<textarea value={complaint} onChange={(e) => setComplaint(e.target.value)} required placeholder="What does the customer need help with?" /></label>
+      {error && <div className="form-error">{error}</div>}
+      <button className="button primary wide" disabled={busy || !vehicleId}>{busy ? 'Creating...' : 'Create job card'} <ArrowUpRight size={16} /></button>
+    </form>
+  </Modal>;
 }
 
 function ServiceForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string) => void }) {
@@ -1183,7 +1531,7 @@ function POForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string
 
 function QuotationForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string) => void }) {
   const [jobId, setJobId] = useState(''); const [jobs, setJobs] = useState<(JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[]>([]); const [busy, setBusy] = useState(false);
-  useEffect(() => { supabase.from('job_cards').select('*, vehicles(registration_number), customers(full_name)').in('status', ['COMPLETED','IN_PROGRESS','AWAITING_APPROVAL','APPROVED']).is('deleted_at', null).order('created_at', { ascending: false }).limit(50).then(({ data }) => setJobs((data ?? []) as (JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[])); }, []);
+  useEffect(() => { supabase.from('job_cards').select('*, vehicles(registration_number), customers(full_name)').in('status', ['DIAGNOSIS','IN_PROGRESS','AWAITING_APPROVAL','APPROVED']).is('deleted_at', null).order('created_at', { ascending: false }).limit(50).then(({ data }) => setJobs((data ?? []) as (JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[])); }, []);
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true);
     const job = jobs.find((j) => j.id === jobId); if (!job) { setBusy(false); return; }
@@ -1204,7 +1552,7 @@ function QuotationForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m:
 
 function InvoiceForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string) => void }) {
   const [jobId, setJobId] = useState(''); const [jobs, setJobs] = useState<(JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[]>([]); const [busy, setBusy] = useState(false);
-  useEffect(() => { supabase.from('job_cards').select('*, vehicles(registration_number), customers(full_name)').in('status', ['COMPLETED','READY_FOR_PICKUP']).is('deleted_at', null).order('created_at', { ascending: false }).limit(50).then(({ data }) => setJobs((data ?? []) as (JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[])); }, []);
+  useEffect(() => { supabase.from('job_cards').select('*, vehicles(registration_number), customers(full_name)').in('status', ['QUALITY_CHECK','READY_FOR_COLLECTION']).is('deleted_at', null).order('created_at', { ascending: false }).limit(50).then(({ data }) => setJobs((data ?? []) as (JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[])); }, []);
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true);
     const job = jobs.find((j) => j.id === jobId); if (!job) { setBusy(false); return; }
@@ -1253,4 +1601,85 @@ function StockAdjustForm({ onClose, onSaved }: { onClose: () => void; onSaved: (
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return <div className="modal-backdrop" onClick={onClose}><div className="modal" onClick={(e) => e.stopPropagation()}><div className="modal-heading"><div><p className="eyebrow">Operations</p><h2>{title}</h2></div><button className="close-button" onClick={onClose}><X size={18} /></button></div>{children}</div></div>;
+}
+
+/** Type a customer's name/phone to pick an existing match, or add a new one inline
+ * without leaving the current form. */
+function CustomerPicker({ customers, customerId, onSelect, onCreated }: { customers: Customer[]; customerId: string; onSelect: (id: string) => void; onCreated: (c: Customer) => void }) {
+  const [query, setQuery] = useState(''); const [open, setOpen] = useState(false); const [showNew, setShowNew] = useState(false); const [newPhone, setNewPhone] = useState(''); const [busy, setBusy] = useState(false);
+  const selected = customers.find((c) => c.id === customerId);
+  const q = query.trim().toLowerCase();
+  const matches = q ? customers.filter((c) => c.full_name.toLowerCase().includes(q) || c.phone.includes(q)).slice(0, 8) : [];
+
+  async function createCustomer() {
+    if (!query.trim() || !newPhone.trim()) return;
+    setBusy(true);
+    const { data, error } = await supabase.from('customers').insert({ full_name: query.trim(), phone: newPhone.trim() }).select().single();
+    setBusy(false);
+    if (error || !data) return;
+    onCreated(data as Customer);
+    setShowNew(false); setOpen(false); setQuery(''); setNewPhone('');
+  }
+
+  return <div className="combobox">
+    <input
+      value={selected ? `${selected.full_name} · ${selected.phone}` : query}
+      onChange={(e) => { onSelect(''); setQuery(e.target.value); setShowNew(false); setOpen(true); }}
+      onFocus={() => { if (!selected) setOpen(true); }}
+      onBlur={() => setTimeout(() => setOpen(false), 150)}
+      placeholder="Type a customer's name or phone..."
+      required
+    />
+    {open && !selected && (matches.length > 0 || q.length > 1) && <div className="combobox-dropdown">
+      {matches.map((c) => <button type="button" key={c.id} className="combobox-option" onMouseDown={() => { onSelect(c.id); setQuery(''); setOpen(false); }}>{c.full_name} · {c.phone}</button>)}
+      {q.length > 1 && <button type="button" className="combobox-option combobox-add" onMouseDown={() => setShowNew(true)}><Plus size={14} /> Add &quot;{query.trim()}&quot; as new customer</button>}
+    </div>}
+    {showNew && <div className="combobox-new">
+      <input value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="Phone number for the new customer" />
+      <button type="button" className="button primary small" disabled={busy || !newPhone.trim()} onClick={() => void createCustomer()}>{busy ? 'Saving...' : 'Save customer'}</button>
+    </div>}
+  </div>;
+}
+
+function VehiclePicker({ customerId, vehicles, vehicleId, onSelect, onCreated }: { customerId: string; vehicles: Vehicle[]; vehicleId: string; onSelect: (id: string) => void; onCreated: (v: Vehicle) => void }) {
+  const [query, setQuery] = useState(''); const [open, setOpen] = useState(false); const [showNew, setShowNew] = useState(false);
+  const [newMake, setNewMake] = useState(''); const [newModel, setNewModel] = useState(''); const [newYear, setNewYear] = useState(''); const [newMileage, setNewMileage] = useState(''); const [busy, setBusy] = useState(false);
+  const selected = vehicles.find((v) => v.id === vehicleId);
+  const q = query.trim().toLowerCase();
+  const matches = q ? vehicles.filter((v) => v.registration_number.toLowerCase().includes(q) || v.make.toLowerCase().includes(q) || v.model.toLowerCase().includes(q)) : vehicles;
+
+  async function createVehicle() {
+    if (!customerId || !query.trim() || !newMake.trim() || !newModel.trim()) return;
+    setBusy(true);
+    const { data, error } = await supabase.from('vehicles').insert({ customer_id: customerId, registration_number: query.trim().toUpperCase(), make: newMake.trim(), model: newModel.trim(), year: newYear ? parseInt(newYear) : null, mileage: newMileage ? parseInt(newMileage) : 0 }).select().single();
+    setBusy(false);
+    if (error || !data) return;
+    onCreated(data as Vehicle);
+    setShowNew(false); setOpen(false); setQuery(''); setNewMake(''); setNewModel(''); setNewYear(''); setNewMileage('');
+  }
+
+  if (!customerId) return <input disabled placeholder="Select a customer first..." />;
+
+  return <div className="combobox">
+    <input
+      value={selected ? `${selected.registration_number} · ${selected.make} ${selected.model}` : query}
+      onChange={(e) => { onSelect(''); setQuery(e.target.value); setShowNew(false); setOpen(true); }}
+      onFocus={() => { if (!selected) setOpen(true); }}
+      onBlur={() => setTimeout(() => setOpen(false), 150)}
+      placeholder="Type registration number, make or model..."
+      required
+    />
+    {open && !selected && <div className="combobox-dropdown">
+      {matches.length === 0 && <p className="combobox-empty">No vehicles yet for this customer.</p>}
+      {matches.map((v) => <button type="button" key={v.id} className="combobox-option" onMouseDown={() => { onSelect(v.id); setQuery(''); setOpen(false); }}>{v.registration_number} · {v.make} {v.model}{v.year ? ` (${v.year})` : ''}</button>)}
+      {q.length > 1 && <button type="button" className="combobox-option combobox-add" onMouseDown={() => setShowNew(true)}><Plus size={14} /> Add &quot;{query.trim().toUpperCase()}&quot; as new vehicle</button>}
+    </div>}
+    {showNew && <div className="combobox-new combobox-new-wrap">
+      <input value={newMake} onChange={(e) => setNewMake(e.target.value)} placeholder="Make" />
+      <input value={newModel} onChange={(e) => setNewModel(e.target.value)} placeholder="Model" />
+      <input value={newYear} onChange={(e) => setNewYear(e.target.value)} placeholder="Year" type="number" />
+      <input value={newMileage} onChange={(e) => setNewMileage(e.target.value)} placeholder="Mileage (KM)" type="number" />
+      <button type="button" className="button primary small" disabled={busy || !newMake.trim() || !newModel.trim()} onClick={() => void createVehicle()}>{busy ? 'Saving...' : 'Save vehicle'}</button>
+    </div>}
+  </div>;
 }

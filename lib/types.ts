@@ -74,12 +74,68 @@ export type JobCard = {
   mileage: number;
   complaint: string;
   requested_service: string | null;
-  diagnosis: string | null;
   recommended_work: string | null;
   priority: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
   status: string;
+  job_types: string[];
+  promised_at: string | null;
+  received_at: string | null;
+  released_at: string | null;
   estimated_completion_date: string | null;
   created_at: string;
+};
+
+export type JobCardInspectionItem = {
+  id: string;
+  job_card_id: string;
+  category: 'ENGINE' | 'TRANSMISSION' | 'BRAKES' | 'SUSPENSION' | 'ELECTRICAL' | 'TYRES' | 'BODY_PAINT' | 'OTHER';
+  condition: 'NORMAL' | 'REQUIRES_ATTENTION' | 'DAMAGED' | 'NOT_CHECKED';
+  notes: string | null;
+  checked_by: string | null;
+  checked_at: string;
+};
+
+export type JobCardWorkItem = {
+  id: string;
+  job_card_id: string;
+  description: string;
+  assigned_technician_id: string | null;
+  priority: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+  notes: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type JobCardDiagnosis = {
+  id: string;
+  job_card_id: string;
+  findings: string;
+  fault_codes: string | null;
+  observations: string | null;
+  recommended_repairs: string | null;
+  technician_id: string | null;
+  created_at: string;
+};
+
+export type JobCardQualityCheck = {
+  id: string;
+  job_card_id: string;
+  checklist: Record<string, boolean>;
+  result: 'PASSED' | 'FAILED' | 'REWORK_REQUIRED';
+  notes: string | null;
+  checked_by: string | null;
+  checked_at: string;
+};
+
+export type JobCardSignoff = {
+  id: string;
+  job_card_id: string;
+  role: 'ADVISOR' | 'TECHNICIAN' | 'QUALITY_CHECK' | 'CUSTOMER';
+  name: string;
+  signed_at: string;
+  user_id: string | null;
 };
 
 export type JobCardLabour = {
@@ -261,6 +317,7 @@ export type BusinessSettings = {
   quote_prefix: string;
   job_card_prefix: string;
   receipt_prefix: string;
+  job_card_terms: string;
 };
 
 export type Role = { id: string; name: string; label: string };

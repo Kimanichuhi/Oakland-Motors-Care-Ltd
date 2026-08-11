@@ -51,11 +51,11 @@ describe('RBAC matrix: TECHNICIAN', () => {
     const job = await seedJobCard(admin, customer.id, vehicle.id);
     const { client: technician } = await createStaffUser('TECHNICIAN', 'technician');
 
-    const { data } = await technician.from('job_cards').update({ diagnosis: 'Worn brake pads' }).eq('id', job.id).select();
+    const { data } = await technician.from('job_cards').update({ recommended_work: 'Replace worn brake pads' }).eq('id', job.id).select();
     expect(data ?? []).toHaveLength(1);
 
-    const { data: updated } = await admin.from('job_cards').select('diagnosis').eq('id', job.id).single();
-    expect(updated?.diagnosis).toBe('Worn brake pads');
+    const { data: updated } = await admin.from('job_cards').select('recommended_work').eq('id', job.id).single();
+    expect(updated?.recommended_work).toBe('Replace worn brake pads');
   });
 });
 
@@ -158,7 +158,7 @@ describe('RBAC matrix: OWNER_READONLY', () => {
     expect(created ?? []).toHaveLength(0);
     void createError;
 
-    const { data: modified } = await owner.from('job_cards').update({ diagnosis: 'nope' }).eq('id', job.id).select();
+    const { data: modified } = await owner.from('job_cards').update({ recommended_work: 'nope' }).eq('id', job.id).select();
     expect(modified ?? []).toHaveLength(0);
   });
 });

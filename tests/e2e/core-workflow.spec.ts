@@ -105,19 +105,22 @@ test('core workshop workflow: setup through payment and delivery', async ({ page
     await page.getByText(new RegExp(`^${jobNumberPrefix}`)).first().click();
   });
 
-  await test.step('assign a technician and record diagnosis', async () => {
+  await test.step('receive the vehicle, assign a technician, and record diagnosis', async () => {
+    await page.getByRole('button', { name: 'RECEIVED' }).click();
+    await expect(page.getByText('Job moved to RECEIVED.')).toBeVisible();
+
     await page.getByRole('button', { name: /Assign/ }).click();
     await selectByOptionText(page.locator('.assign-row select'), /E2E Technician/);
     await expect(page.getByText('Technician assigned.')).toBeVisible();
 
-    await page.getByPlaceholder('Enter diagnosis...').fill('Front brake pads worn below minimum thickness.');
-    await page.getByRole('button', { name: 'Save' }).click();
-    await expect(page.getByText('Diagnosis saved.')).toBeVisible();
+    await page.getByPlaceholder('Diagnostic findings...').fill('Front brake pads worn below minimum thickness.');
+    await page.getByRole('button', { name: 'Add diagnosis' }).click();
+    await expect(page.getByText('Diagnosis added.')).toBeVisible();
   });
 
   await test.step('move the job to AWAITING_APPROVAL and create a quotation', async () => {
-    await page.getByRole('button', { name: 'DIAGNOSING' }).click();
-    await expect(page.getByText('Job moved to DIAGNOSING.')).toBeVisible();
+    await page.getByRole('button', { name: 'DIAGNOSIS' }).click();
+    await expect(page.getByText('Job moved to DIAGNOSIS.')).toBeVisible();
     await page.getByRole('button', { name: 'AWAITING APPROVAL' }).click();
     await expect(page.getByText('Job moved to AWAITING APPROVAL.')).toBeVisible();
 
@@ -157,9 +160,9 @@ test('core workshop workflow: setup through payment and delivery', async ({ page
     expect(part?.quantity_on_hand).toBe(8);
   });
 
-  await test.step('complete the job and generate an invoice', async () => {
-    await page.getByRole('button', { name: 'COMPLETED' }).click();
-    await expect(page.getByText('Job moved to COMPLETED.')).toBeVisible();
+  await test.step('send the job for quality check and generate an invoice', async () => {
+    await page.getByRole('button', { name: 'QUALITY CHECK' }).click();
+    await expect(page.getByText('Job moved to QUALITY CHECK.')).toBeVisible();
 
     await page.locator('.sidebar').getByText('Invoices', { exact: true }).click();
     await page.getByRole('button', { name: 'New invoice' }).click();
@@ -197,13 +200,22 @@ test('core workshop workflow: setup through payment and delivery', async ({ page
     expect(settled?.amount_paid_minor).toBe(invoiceTotalMinor);
   });
 
-  await test.step('mark the vehicle ready and delivered', async () => {
+  await test.step('pass the quality check and mark the vehicle ready and collected', async () => {
     await page.locator('.sidebar').getByText('Job Cards', { exact: true }).click();
     await page.getByText(new RegExp(`^${jobNumberPrefix}`)).first().click();
-    await page.getByRole('button', { name: 'READY FOR PICKUP' }).click();
-    await expect(page.getByText('Job moved to READY FOR PICKUP.')).toBeVisible();
-    await page.getByRole('button', { name: 'DELIVERED' }).click();
-    await expect(page.getByText('Job moved to DELIVERED.')).toBeVisible();
+
+    // READY_FOR_COLLECTION is gated behind a passed quality check — drive the real form
+    // rather than seeding it, to prove the gate and the UI both work end to end.
+    const qcForm = page.locator('form.modal-form').filter({ has: page.getByRole('button', { name: 'Record quality check' }) });
+    await qcForm.getByText('Vehicle ready for release').click();
+    await qcForm.getByRole('combobox').selectOption('PASSED');
+    await qcForm.getByRole('button', { name: 'Record quality check' }).click();
+    await expect(page.getByText('Quality check recorded.')).toBeVisible();
+
+    await page.getByRole('button', { name: 'READY FOR COLLECTION' }).click();
+    await expect(page.getByText('Job moved to READY FOR COLLECTION.')).toBeVisible();
+    await page.getByRole('button', { name: 'COLLECTED' }).click();
+    await expect(page.getByText('Job moved to COLLECTED.')).toBeVisible();
   });
 
   await test.step('verify vehicle service history and audit trail', async () => {
