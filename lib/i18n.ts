@@ -1,7 +1,7 @@
 export type Locale = 'en' | 'sw';
 
 const en: Record<string, string> = {
-  'app.name': 'Oakland Motors',
+  'app.name': 'Oakland Motor Care Ltd',
   'app.tagline': 'Workshop Operations',
   'nav.dashboard': 'Dashboard',
   'nav.customers': 'Customers',
@@ -58,7 +58,7 @@ const en: Record<string, string> = {
 };
 
 const sw: Record<string, string> = {
-  'app.name': 'Oakland Motors',
+  'app.name': 'Oakland Motor Care Ltd',
   'app.tagline': 'Uendeshaji wa Warsha',
   'nav.dashboard': 'Dashibodi',
   'nav.customers': 'Wateja',

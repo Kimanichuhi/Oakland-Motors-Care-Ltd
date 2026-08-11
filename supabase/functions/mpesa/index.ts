@@ -83,7 +83,7 @@ Deno.serve(async (req: Request) => {
         PhoneNumber: phone,
         CallBackURL: callbackUrl,
         AccountReference: accountRef || `INV-${invoiceId.slice(0, 8)}`,
-        TransactionDesc: "Oakland Motors payment",
+        TransactionDesc: "Oakland Motor Care Ltd payment",
       };
 
       const stkResp = await fetch(`${baseUrl}/mpesa/stkpush/v1/processrequest`, {

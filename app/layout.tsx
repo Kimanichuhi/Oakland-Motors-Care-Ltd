@@ -5,8 +5,8 @@ import { Josefin_Sans } from 'next/font/google';
 const josefin = Josefin_Sans({ subsets: ['latin'], variable: '--font-sans' });
 
 export const metadata: Metadata = {
-  title: 'Oakland Motors | Workshop Operations',
-  description: 'The operating system for Oakland Motors workshop operations.',
+  title: 'Oakland Motor Care Ltd | Workshop Operations',
+  description: 'The operating system for Oakland Motor Care Ltd workshop operations.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
