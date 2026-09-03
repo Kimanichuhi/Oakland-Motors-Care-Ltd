@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,6 +12,15 @@ function jsonResponse(data: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+function timingSafeEqual(a: string, b: string): boolean {
+  const bufA = new TextEncoder().encode(a);
+  const bufB = new TextEncoder().encode(b);
+  if (bufA.length !== bufB.length) return false;
+  let diff = 0;
+  for (let i = 0; i < bufA.length; i++) diff |= bufA[i] ^ bufB[i];
+  return diff === 0;
 }
 
 async function getMpesaToken(): Promise<string | null> {
@@ -40,13 +50,47 @@ Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
   const path = url.pathname;
 
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+
   if (path.endsWith("/stk-push") && req.method === "POST") {
     try {
+      if (!supabaseUrl || !serviceRoleKey || !anonKey) {
+        return jsonResponse({ error: "Server misconfigured" }, 500);
+      }
+
+      // Only staff who hold payment.create may trigger a real charge attempt.
+      const authHeader = req.headers.get("Authorization");
+      if (!authHeader) return jsonResponse({ error: "Missing Authorization header" }, 401);
+
+      const callerClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
+      const { data: { user: caller }, error: callerError } = await callerClient.auth.getUser();
+      if (callerError || !caller) return jsonResponse({ error: "Invalid session" }, 401);
+
+      const { data: allowed, error: permError } = await callerClient.rpc("has_permission", { permission_key: "payment.create" });
+      if (permError || !allowed) return jsonResponse({ error: "Not authorized to request M-Pesa payments" }, 403);
+
       const body = await req.json();
       const { invoiceId, phone, amount, accountRef } = body;
 
       if (!invoiceId || !phone || !amount) {
         return jsonResponse({ error: "Missing required fields: invoiceId, phone, amount" }, 400);
+      }
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return jsonResponse({ error: "amount must be a positive number of minor units" }, 400);
+      }
+
+      // RLS-scoped lookup: confirms the invoice exists and the caller may see it,
+      // and that it's still open for payment.
+      const { data: invoice, error: invoiceError } = await callerClient
+        .from("invoices")
+        .select("id, status")
+        .eq("id", invoiceId)
+        .maybeSingle();
+      if (invoiceError || !invoice) return jsonResponse({ error: "Invoice not found" }, 404);
+      if (invoice.status === "VOID" || invoice.status === "PAID") {
+        return jsonResponse({ error: `Invoice is already ${invoice.status.toLowerCase()}` }, 400);
       }
 
       const shortcode = Deno.env.get("MPESA_SHORTCODE");
@@ -82,7 +126,7 @@ Deno.serve(async (req: Request) => {
         PartyB: shortcode,
         PhoneNumber: phone,
         CallBackURL: callbackUrl,
-        AccountReference: accountRef || `INV-${invoiceId.slice(0, 8)}`,
+        AccountReference: accountRef || `INV-${String(invoiceId).slice(0, 8)}`,
         TransactionDesc: "Oakland Motor Care Ltd payment",
       };
 
@@ -98,6 +142,18 @@ Deno.serve(async (req: Request) => {
       const stkData = await stkResp.json();
 
       if (stkData.ResponseCode === "0") {
+        // Record the pending attempt now, keyed by checkout_request_id, so the
+        // callback (which carries no invoice reference of its own) can find it.
+        const admin = createClient(supabaseUrl, serviceRoleKey);
+        await admin.from("mpesa_transactions").insert({
+          merchant_request_id: stkData.MerchantRequestID,
+          checkout_request_id: stkData.CheckoutRequestID,
+          invoice_id: invoiceId,
+          amount: Math.round(amount),
+          phone: String(phone),
+          status: "PENDING",
+        });
+
         return jsonResponse({
           success: true,
           merchantRequestId: stkData.MerchantRequestID,
@@ -117,6 +173,19 @@ Deno.serve(async (req: Request) => {
 
   if (path.endsWith("/callback") && req.method === "POST") {
     try {
+      // Daraja callbacks carry no Supabase session and cannot be signature-verified,
+      // so a shared secret in the registered callback URL is the only thing standing
+      // between this endpoint and anyone who finds it. Require it.
+      const callbackSecret = Deno.env.get("MPESA_CALLBACK_SECRET");
+      const providedSecret = url.searchParams.get("key") ?? "";
+      if (!callbackSecret || !timingSafeEqual(providedSecret, callbackSecret)) {
+        return jsonResponse({ error: "Unauthorized" }, 401);
+      }
+
+      if (!supabaseUrl || !serviceRoleKey) {
+        return jsonResponse({ error: "Server misconfigured" }, 500);
+      }
+
       const body = await req.json();
       const callback = body?.Body?.stkCallback;
       if (!callback) return jsonResponse({ success: true });
@@ -125,67 +194,60 @@ Deno.serve(async (req: Request) => {
       const resultCode = callback.ResultCode;
       const resultDesc = callback.ResultDesc;
 
-      const supabaseUrl = Deno.env.get("SUPABASE_URL");
-      const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-
-      if (!supabaseUrl || !serviceRoleKey) {
-        return jsonResponse({ error: "Server misconfigured" }, 500);
-      }
-
       const callbackMetadata = callback.CallbackMetadata?.Item;
       const amount = callbackMetadata?.find((i: { Name: string }) => i.Name === "Amount")?.Value;
       const mpesaReceipt = callbackMetadata?.find((i: { Name: string }) => i.Name === "MpesaReceiptNumber")?.Value;
       const transactionDate = callbackMetadata?.find((i: { Name: string }) => i.Name === "TransactionDate")?.Value;
       const phone = callbackMetadata?.find((i: { Name: string }) => i.Name === "PhoneNumber")?.Value;
 
-      const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
-      const supabase = createClient(supabaseUrl, serviceRoleKey);
+      const admin = createClient(supabaseUrl, serviceRoleKey);
 
-      const { data: existing } = await supabase
+      // Only ever settle a transaction we ourselves initiated at STK-push time —
+      // never create one from an inbound callback, which would let anyone who
+      // guesses/replays a checkout_request_id fabricate a payment record.
+      const { data: tx } = await admin
         .from("mpesa_transactions")
-        .select("id")
+        .select("id, invoice_id, status")
         .eq("checkout_request_id", checkoutRequestId)
         .maybeSingle();
 
-      if (existing) {
+      if (!tx) {
+        return jsonResponse({ success: true, message: "Unknown transaction ignored" });
+      }
+      if (tx.status !== "PENDING") {
         return jsonResponse({ success: true, message: "Duplicate callback ignored" });
       }
 
-      const { data: mpesaTx } = await supabase
+      const nextStatus = resultCode === 0 ? "COMPLETED" : "FAILED";
+      await admin
         .from("mpesa_transactions")
-        .insert({
-          merchant_request_id: callback.MerchantRequestID,
-          checkout_request_id: checkoutRequestId,
+        .update({
           result_code: resultCode,
           result_description: resultDesc,
           amount: amount ? Math.round(amount * 100) : null,
           receipt_number: mpesaReceipt || null,
           transaction_date: transactionDate ? new Date(Number(transactionDate)).toISOString() : null,
-          phone: phone ? String(phone) : null,
+          phone: phone ? String(phone) : undefined,
           callback_payload: body,
+          status: nextStatus,
         })
-        .select()
-        .single();
+        .eq("id", tx.id);
 
-      if (resultCode === 0 && mpesaTx) {
-        const { data: invLink } = await supabase
-          .from("mpesa_transactions")
-          .select("invoice_id")
-          .eq("checkout_request_id", checkoutRequestId)
-          .maybeSingle();
+      if (resultCode === 0 && tx.invoice_id && amount) {
+        const idempotencyKey = `mpesa-${mpesaReceipt || checkoutRequestId}`;
+        const { error: paymentError } = await admin.rpc("record_mpesa_payment", {
+          p_invoice_id: tx.invoice_id,
+          p_amount_minor: Math.round(amount * 100),
+          p_reference: mpesaReceipt || checkoutRequestId,
+          p_idempotency_key: idempotencyKey,
+          p_notes: "M-Pesa STK push",
+        });
 
-        const invoiceId = invLink?.invoice_id;
-
-        if (invoiceId && amount) {
-          const idempotencyKey = `mpesa-${mpesaReceipt || checkoutRequestId}`;
-          await supabase.rpc("record_payment", {
-            p_invoice_id: invoiceId,
-            p_amount_minor: Math.round(amount * 100),
-            p_method: "MPESA",
-            p_reference: mpesaReceipt || checkoutRequestId,
-            p_idempotency_key: idempotencyKey,
-            p_notes: `M-Pesa STK push`,
-          });
+        if (paymentError) {
+          await admin
+            .from("mpesa_transactions")
+            .update({ status: "NEEDS_REVIEW", reconciliation_note: paymentError.message })
+            .eq("id", tx.id);
         }
       }
 

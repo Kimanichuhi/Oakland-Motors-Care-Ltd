@@ -3,6 +3,7 @@ export const PERMISSIONS = [
   'vehicle.view','vehicle.create','vehicle.update',
   'job.view','job.create','job.update','job.assign','job.complete','job.deliver',
   'inventory.view','inventory.create','inventory.issue','inventory.receive','inventory.adjust',
+  'sales.view','sales.create','sales.void','sales.price.override','sales.report',
   'supplier.view','supplier.create','supplier.update',
   'purchase_order.view','purchase_order.create','purchase_order.approve','purchase_order.receive',
   'quotation.view','quotation.create','quotation.approve','quotation.reject',
@@ -84,7 +85,24 @@ export const ACCOUNT_STATUSES = ['INVITED','ACTIVE','SUSPENDED','DISABLED'] as c
 
 export const PAYMENT_METHODS = ['CASH','MPESA','BANK','CARD','OTHER'] as const;
 
-export const MOVEMENT_TYPES = ['OPENING_BALANCE','PURCHASE','JOB_CARD_USAGE','RETURN','ADJUSTMENT_IN','ADJUSTMENT_OUT','DAMAGE','TRANSFER'] as const;
+export const SALES_PAYMENT_METHODS = ['CASH','MPESA','BANK','CARD','CREDIT','JOB_CARD','OTHER'] as const;
+export const SALES_PAYMENT_STATUSES = ['PAID','PARTIAL','PENDING'] as const;
+export const SALE_STATUSES = ['COMPLETED','PARTIALLY_RETURNED','RETURNED','VOIDED'] as const;
+export const CUSTOMER_SALE_TYPES = ['WALK_IN','VEHICLE_OWNER','BUSINESS','GARAGE_WORKSHOP','OTHER'] as const;
+
+export const PART_CATEGORIES = [
+  'Wheel Bearings','Tie Rod Ends','CV Joints','Ignition Coils','Coil Springs','Shock Spacers',
+  'Brake Pads','Brake Shoes','Oil Filters','Air Cleaners / Air Filters','Spark Plugs',
+  'Stabilizer Links','Belts','Ball Joints','Arm Bushes','Transmission Fluid',
+  'Steering Components','Accessories','Other',
+] as const;
+
+export const ACCESSORY_PRESETS = [
+  'Chevrons - Small','Chevrons - Big','Chevrons - Pickup','Chevrons - Lorry','Chevrons - Probox',
+  'Round Reflectors','Amber Reflectors','Cell Tape - Globe','Cell Tape - Watu wa Rangi',
+] as const;
+
+export const MOVEMENT_TYPES = ['OPENING_BALANCE','PURCHASE','JOB_CARD_USAGE','SALE','SALE_REVERSAL','RETURN','ADJUSTMENT_IN','ADJUSTMENT_OUT','DAMAGE','TRANSFER'] as const;
 
 export const PO_STATUSES = ['DRAFT','SUBMITTED','APPROVED','ORDERED','PARTIALLY_RECEIVED','RECEIVED','CANCELLED'] as const;
 
@@ -125,4 +143,8 @@ export const statusStyles: Record<string, string> = {
   REQUIRES_ATTENTION: 'bg-amber-50 text-amber-700',
   DAMAGED: 'bg-red-50 text-red-700',
   NOT_CHECKED: 'bg-slate-100 text-slate-500',
+  PARTIAL: 'bg-amber-50 text-amber-700',
+  PARTIALLY_RETURNED: 'bg-amber-50 text-amber-700',
+  RETURNED: 'bg-sky-50 text-sky-700',
+  VOIDED: 'bg-slate-100 text-slate-500',
 };

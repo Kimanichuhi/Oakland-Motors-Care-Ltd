@@ -1,11 +1,11 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatKes, formatDate, formatDateTime, computeLineTotal } from '@/lib/formatting';
-import { statusStyles, JOB_TRANSITIONS, PAYMENT_METHODS, JOB_TYPE_META, INSPECTION_CATEGORIES, INSPECTION_CONDITIONS, WORK_ITEM_STATUSES, QUALITY_CHECK_ITEMS, QUALITY_CHECK_RESULTS, SIGNOFF_ROLES } from '@/lib/constants';
+import { statusStyles, JOB_TRANSITIONS, PAYMENT_METHODS, SALES_PAYMENT_METHODS, SALES_PAYMENT_STATUSES, CUSTOMER_SALE_TYPES, PART_CATEGORIES, JOB_TYPE_META, INSPECTION_CATEGORIES, INSPECTION_CONDITIONS, WORK_ITEM_STATUSES, QUALITY_CHECK_ITEMS, QUALITY_CHECK_RESULTS, SIGNOFF_ROLES } from '@/lib/constants';
 import { loadUserPermissions, hasPermission, clearPermissionCache, type UserPermission } from '@/lib/permissions';
-import type { Customer, Vehicle, Service, Part, Supplier, JobCard, JobCardLabour, JobCardPart, JobCardStatusHistory, JobCardInspectionItem, JobCardWorkItem, JobCardDiagnosis, JobCardQualityCheck, JobCardSignoff, Invoice, InvoiceItem, Payment, Quotation, QuotationItem, PurchaseOrder, PurchaseOrderItem, StockMovement, Employee, Notification, AuditLog, BusinessSettings, Role, Permission, Profile } from '@/lib/types';
+import type { Customer, Vehicle, Service, Part, Supplier, JobCard, JobCardLabour, JobCardPart, JobCardStatusHistory, JobCardInspectionItem, JobCardWorkItem, JobCardDiagnosis, JobCardQualityCheck, JobCardSignoff, Invoice, InvoiceItem, Payment, Quotation, QuotationItem, PurchaseOrder, PurchaseOrderItem, StockMovement, Sale, SaleItem, Employee, Notification, AuditLog, BusinessSettings, Role, Permission, Profile } from '@/lib/types';
 import {
   ArrowUpRight, Bell, CarFront, CheckCircle2, CircleDollarSign, ClipboardList, Gauge,
   LayoutDashboard, LogOut, Menu, Package, Plus, Search, Settings, ShieldCheck, Sparkles, Users,
@@ -14,9 +14,13 @@ import {
   Briefcase, Boxes, Store, Banknote, Smartphone, FileCheck, Clock, Activity, Calendar, Printer,
 } from 'lucide-react';
 
+import SalesSection from '@/components/sales/SalesSection';
+import SaleDetail from '@/components/sales/SaleDetail';
+import SaleForm from '@/components/sales/SaleForm';
+
 type SectionId =
   | 'dashboard' | 'customers' | 'vehicles' | 'jobcards' | 'services' | 'technicians'
-  | 'parts' | 'stockmovements' | 'lowstock' | 'suppliers' | 'procurement'
+  | 'sales' | 'parts' | 'stockmovements' | 'lowstock' | 'suppliers' | 'procurement'
   | 'quotations' | 'invoices' | 'payments' | 'receipts'
   | 'reports' | 'notifications' | 'audit' | 'settings' | 'users';
 
@@ -30,6 +34,7 @@ const NAV_GROUPS: { label: string; items: { id: SectionId; label: string; icon: 
     { id: 'technicians', label: 'Technicians', icon: <UserCog size={18} />, perm: 'job.view' },
   ] },
   { label: 'Inventory', items: [
+    { id: 'sales', label: 'Sales', icon: <Store size={18} />, perm: 'sales.view' },
     { id: 'parts', label: 'Parts', icon: <Package size={18} />, perm: 'inventory.view' },
     { id: 'stockmovements', label: 'Stock Movements', icon: <Boxes size={18} />, perm: 'inventory.view' },
     { id: 'lowstock', label: 'Low Stock', icon: <AlertTriangle size={18} />, perm: 'inventory.view' },
@@ -71,6 +76,7 @@ export default function Home() {
   const [showQuotationForm, setShowQuotationForm] = useState(false);
   const [showInvoiceForm, setShowInvoiceForm] = useState(false);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [showSaleForm, setShowSaleForm] = useState(false);
   const [showStockReceiveForm, setShowStockReceiveForm] = useState(false);
   const [showStockAdjustForm, setShowStockAdjustForm] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -80,9 +86,12 @@ export default function Home() {
   const [selectedQuotationId, setSelectedQuotationId] = useState<string | null>(null);
   const [selectedPOId, setSelectedPOId] = useState<string | null>(null);
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
+  const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
+  const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [permsLoaded, setPermsLoaded] = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -91,7 +100,8 @@ export default function Home() {
       if (data.session) void loadUserPermissions().then((p) => { setUserPerms(p); setPermsLoaded(true); });
       else setPermsLoaded(true);
     });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true);
       setSession(nextSession);
       clearPermissionCache();
       setPermsLoaded(false);
@@ -113,15 +123,16 @@ export default function Home() {
     setUserPerms({ permissions: [], role: '', roleLabel: '', fullName: '' });
   }
 
-  const can = (perm: string) => hasPermission(userPerms, perm);
+  const can = useCallback((perm: string) => hasPermission(userPerms, perm), [userPerms]);
 
   const visibleNav = useMemo(() => NAV_GROUPS.map((group) => ({
     ...group,
     items: group.items.filter((item) => can(item.perm)),
-  })).filter((group) => group.items.length > 0), [userPerms]);
+  })).filter((group) => group.items.length > 0), [can]);
 
   if (loading) return <div className="loading-screen"><div className="brand-mark">OM</div><p>Oakland Motor Care Ltd</p></div>;
   if (!session) return <AuthScreen error={authError} setError={setAuthError} />;
+  if (recoveryMode) return <ResetPasswordScreen onDone={() => setRecoveryMode(false)} />;
   if (permsLoaded && userPerms.permissions.length === 0) return <AccountInactiveScreen onSignOut={() => void signOut()} />;
 
   return <main className="app-shell">
@@ -131,7 +142,7 @@ export default function Home() {
       <nav className="nav-list">
         {visibleNav.map((group, gi) => <div key={gi} className="nav-group">
           {group.label && <p className="nav-label">{group.label}</p>}
-          {group.items.map((item) => <button key={item.id} className={section === item.id ? 'nav-item active' : 'nav-item'} onClick={() => { setSection(item.id); setShowMobileNav(false); setSelectedJobId(null); setSelectedVehicleId(null); setSelectedCustomerId(null); setSelectedInvoiceId(null); setSelectedQuotationId(null); setSelectedPOId(null); setSelectedSupplierId(null); }}>{item.icon}{item.label}</button>)}
+          {group.items.map((item) => <button key={item.id} className={section === item.id ? 'nav-item active' : 'nav-item'} onClick={() => { setSection(item.id); setShowMobileNav(false); setSelectedJobId(null); setSelectedVehicleId(null); setSelectedCustomerId(null); setSelectedInvoiceId(null); setSelectedQuotationId(null); setSelectedPOId(null); setSelectedSupplierId(null); setSelectedSaleId(null); setSelectedPartId(null); }}>{item.icon}{item.label}</button>)}
         </div>)}
       </nav>
       <div className="sidebar-bottom">
@@ -176,6 +187,10 @@ export default function Home() {
           setSelectedPOId={setSelectedPOId}
           selectedSupplierId={selectedSupplierId}
           setSelectedSupplierId={setSelectedSupplierId}
+          selectedSaleId={selectedSaleId}
+          setSelectedSaleId={setSelectedSaleId}
+          selectedPartId={selectedPartId}
+          setSelectedPartId={setSelectedPartId}
           showCustomerForm={showCustomerForm}
           setShowCustomerForm={setShowCustomerForm}
           showVehicleForm={showVehicleForm}
@@ -196,6 +211,8 @@ export default function Home() {
           setShowInvoiceForm={setShowInvoiceForm}
           showPaymentForm={showPaymentForm}
           setShowPaymentForm={setShowPaymentForm}
+          showSaleForm={showSaleForm}
+          setShowSaleForm={setShowSaleForm}
           showStockReceiveForm={showStockReceiveForm}
           setShowStockReceiveForm={setShowStockReceiveForm}
           showStockAdjustForm={showStockAdjustForm}
@@ -213,6 +230,7 @@ export default function Home() {
     {showQuotationForm && <QuotationForm onClose={() => setShowQuotationForm(false)} onSaved={(m) => { setShowQuotationForm(false); setNotice(m); refresh(); }} />}
     {showInvoiceForm && <InvoiceForm onClose={() => setShowInvoiceForm(false)} onSaved={(m) => { setShowInvoiceForm(false); setNotice(m); refresh(); }} />}
     {showPaymentForm && <PaymentForm onClose={() => setShowPaymentForm(false)} onSaved={(m) => { setShowPaymentForm(false); setNotice(m); refresh(); }} />}
+    {showSaleForm && <SaleForm onClose={() => setShowSaleForm(false)} onSaved={(m) => { setShowSaleForm(false); setNotice(m); refresh(); }} can={can} />}
     {showStockReceiveForm && <StockReceiveForm onClose={() => setShowStockReceiveForm(false)} onSaved={(m) => { setShowStockReceiveForm(false); setNotice(m); refresh(); }} />}
     {showStockAdjustForm && <StockAdjustForm onClose={() => setShowStockAdjustForm(false)} onSaved={(m) => { setShowStockAdjustForm(false); setNotice(m); refresh(); }} />}
   </main>;
@@ -228,6 +246,8 @@ type SectionProps = {
   selectedQuotationId: string | null; setSelectedQuotationId: (id: string | null) => void;
   selectedPOId: string | null; setSelectedPOId: (id: string | null) => void;
   selectedSupplierId: string | null; setSelectedSupplierId: (id: string | null) => void;
+  selectedSaleId: string | null; setSelectedSaleId: (id: string | null) => void;
+  selectedPartId: string | null; setSelectedPartId: (id: string | null) => void;
   showCustomerForm: boolean; setShowCustomerForm: (v: boolean) => void;
   showVehicleForm: boolean; setShowVehicleForm: (v: boolean) => void;
   showJobForm: boolean; setShowJobForm: (v: boolean) => void;
@@ -238,6 +258,7 @@ type SectionProps = {
   showQuotationForm: boolean; setShowQuotationForm: (v: boolean) => void;
   showInvoiceForm: boolean; setShowInvoiceForm: (v: boolean) => void;
   showPaymentForm: boolean; setShowPaymentForm: (v: boolean) => void;
+  showSaleForm: boolean; setShowSaleForm: (v: boolean) => void;
   showStockReceiveForm: boolean; setShowStockReceiveForm: (v: boolean) => void;
   showStockAdjustForm: boolean; setShowStockAdjustForm: (v: boolean) => void;
 };
@@ -251,7 +272,8 @@ function SectionRouter(props: SectionProps) {
     case 'jobcards': return p.selectedJobId ? <JobDetail id={p.selectedJobId} onBack={() => p.setSelectedJobId(null)} can={p.can} onNotice={p.onNotice} onRefresh={p.onRefresh} onNewQuotation={() => p.setShowQuotationForm(true)} onNewInvoice={() => p.setShowInvoiceForm(true)} /> : <JobsSection query={p.query} onNew={() => p.setShowJobForm(true)} onSelect={(id) => p.setSelectedJobId(id)} />;
     case 'services': return <ServicesSection onNew={() => p.setShowServiceForm(true)} />;
     case 'technicians': return <TechniciansSection />;
-    case 'parts': return <PartsSection onNew={() => p.setShowPartForm(true)} onReceive={() => p.setShowStockReceiveForm(true)} onAdjust={() => p.setShowStockAdjustForm(true)} can={p.can} />;
+    case 'sales': return p.selectedSaleId ? <SaleDetail id={p.selectedSaleId} onBack={() => p.setSelectedSaleId(null)} can={p.can} onNotice={p.onNotice} onRefresh={p.onRefresh} /> : <SalesSection query={p.query} onNew={() => p.setShowSaleForm(true)} onSelect={(id) => p.setSelectedSaleId(id)} can={p.can} />;
+    case 'parts': return p.selectedPartId ? <PartDetail id={p.selectedPartId} onBack={() => p.setSelectedPartId(null)} /> : <PartsSection onNew={() => p.setShowPartForm(true)} onReceive={() => p.setShowStockReceiveForm(true)} onAdjust={() => p.setShowStockAdjustForm(true)} onSelect={(id) => p.setSelectedPartId(id)} can={p.can} />;
     case 'stockmovements': return <StockMovementsSection />;
     case 'lowstock': return <LowStockSection />;
     case 'suppliers': return p.selectedSupplierId ? <SupplierDetail id={p.selectedSupplierId} onBack={() => p.setSelectedSupplierId(null)} onNewPO={() => p.setShowPOForm(true)} /> : <SuppliersSection query={p.query} onNew={() => p.setShowSupplierForm(true)} onSelect={(id) => p.setSelectedSupplierId(id)} />;
@@ -271,7 +293,9 @@ function SectionRouter(props: SectionProps) {
 
 // === AUTH ===
 function AuthScreen({ error, setError }: { error: string; setError: (v: string) => void }) {
+  const [mode, setMode] = useState<'signin' | 'forgot'>('signin');
   const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [busy, setBusy] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -287,7 +311,85 @@ function AuthScreen({ error, setError }: { error: string; setError: (v: string) 
     }
   }
 
-  return <div className="auth-layout"><div className="auth-panel"><div className="auth-card"><img src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" /><h2>Welcome back</h2><p className="muted">Sign in to continue.</p><form onSubmit={submit}><label>Work email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@oaklandmotorcare.co.ke" required /></label><label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" minLength={6} required /></label>{error && <div className="form-error">{error}</div>}<button className="button primary wide" disabled={busy}>{busy ? 'Please wait...' : 'Sign in'} <ArrowUpRight size={17} /></button></form></div></div></div>;
+  async function submitForgot(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+      redirectTo: window.location.origin,
+    });
+    setBusy(false);
+
+    if (resetError) {
+      setError('We could not send a reset link. Please try again in a moment.');
+      return;
+    }
+    setResetSent(true);
+  }
+
+  function backToSignIn() {
+    setMode('signin');
+    setError('');
+    setResetSent(false);
+  }
+
+  if (mode === 'forgot') {
+    return <div className="auth-layout"><div className="auth-panel"><div className="auth-card">
+      <img src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" />
+      <h2>Reset your password</h2>
+      <p className="muted">Enter your work email and we&apos;ll send you a link to set a new password.</p>
+      {resetSent
+        ? <>
+            <div className="form-success">If an account exists for that email, a reset link is on its way.</div>
+            <button className="switch-auth" type="button" onClick={backToSignIn}>Back to sign in</button>
+          </>
+        : <form onSubmit={submitForgot}>
+            <label>Work email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@oaklandmotorcare.co.ke" required /></label>
+            {error && <div className="form-error">{error}</div>}
+            <button className="button primary wide" disabled={busy}>{busy ? 'Sending...' : 'Send reset link'} <ArrowUpRight size={17} /></button>
+            <button className="switch-auth" type="button" onClick={backToSignIn}>Back to sign in</button>
+          </form>}
+    </div></div></div>;
+  }
+
+  return <div className="auth-layout"><div className="auth-panel"><div className="auth-card"><img src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" /><h2>Welcome back</h2><p className="muted">Sign in to continue.</p><form onSubmit={submit}><label>Work email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@oaklandmotorcare.co.ke" required /></label><label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" minLength={6} required /></label>{error && <div className="form-error">{error}</div>}<button className="button primary wide" disabled={busy}>{busy ? 'Please wait...' : 'Sign in'} <ArrowUpRight size={17} /></button><button className="switch-auth" type="button" onClick={() => { setMode('forgot'); setError(''); }}>Forgot password?</button></form></div></div></div>;
+}
+
+function ResetPasswordScreen({ onDone }: { onDone: () => void }) {
+  const [password, setPassword] = useState(''); const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+
+    if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    if (password !== confirmPassword) { setError('Passwords do not match.'); return; }
+
+    setBusy(true);
+    const { error: updateError } = await supabase.auth.updateUser({ password });
+    setBusy(false);
+
+    if (updateError) {
+      setError('We could not update your password. Please request a new reset link and try again.');
+      return;
+    }
+    onDone();
+  }
+
+  return <div className="auth-layout"><div className="auth-panel"><div className="auth-card">
+    <img src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" />
+    <h2>Set a new password</h2>
+    <p className="muted">Choose a new password for your account.</p>
+    <form onSubmit={submit}>
+      <label>New password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" minLength={6} required /></label>
+      <label>Confirm password<input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Re-enter your new password" minLength={6} required /></label>
+      {error && <div className="form-error">{error}</div>}
+      <button className="button primary wide" disabled={busy}>{busy ? 'Updating...' : 'Update password'} <ArrowUpRight size={17} /></button>
+    </form>
+  </div></div></div>;
 }
 
 function AccountInactiveScreen({ onSignOut }: { onSignOut: () => void }) {
@@ -302,14 +404,18 @@ function AccountInactiveScreen({ onSignOut }: { onSignOut: () => void }) {
 
 // === DASHBOARD ===
 function DashboardSection({ onNewJob, onNewCustomer }: { onNewJob: () => void; onNewCustomer: () => void }) {
-  const [stats, setStats] = useState({ activeJobs: 0, completedToday: 0, readyJobs: 0, customers: 0, vehicles: 0, lowStock: 0, outstandingInvoices: 0, todayRevenue: 0, pendingQuotes: 0 });
+  const [stats, setStats] = useState({ activeJobs: 0, completedToday: 0, readyJobs: 0, customers: 0, vehicles: 0, lowStock: 0, outOfStock: 0, outstandingInvoices: 0, todayRevenue: 0, pendingQuotes: 0, todaySales: 0, weekSales: 0, monthSales: 0 });
   const [recentJobs, setRecentJobs] = useState<(JobCard & { vehicles: { registration_number: string } | null, customers: { full_name: string } | null })[]>([]);
+  const [recentSales, setRecentSales] = useState<Sale[]>([]);
+  const [topItems, setTopItems] = useState<{ name: string; category: string | null; qty: number }[]>([]);
   const [revenueData, setRevenueData] = useState<{ day: string; amount: number }[]>([]);
   const [jobStatusData, setJobStatusData] = useState<{ status: string; count: number }[]>([]);
 
   useEffect(() => {
     (async () => {
       const today = new Date().toISOString().slice(0, 10);
+      const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+      const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
       const [jobs, customers, vehicles, parts, invoices, quotations] = await Promise.all([
         supabase.from('job_cards').select('id,status,created_at,job_number,customer_id,vehicle_id,complaint').is('deleted_at', null).order('created_at', { ascending: false }).limit(50),
         supabase.from('customers').select('id', { count: 'exact', head: true }).is('deleted_at', null),
@@ -324,13 +430,41 @@ function DashboardSection({ onNewJob, onNewCustomer }: { onNewJob: () => void; o
       const completedToday = jobData.filter((j) => j.status === 'QUALITY_CHECK' && j.created_at.slice(0, 10) === today);
       const ready = jobData.filter((j) => j.status === 'READY_FOR_COLLECTION');
       const lowStock = (parts.data ?? []).filter((p) => p.quantity_on_hand <= p.reorder_level);
+      const outOfStock = (parts.data ?? []).filter((p) => p.quantity_on_hand === 0);
       const outstanding = (invoices.data ?? []).reduce((s, inv) => s + (inv.total_minor - inv.amount_paid_minor), 0);
-      setStats({ activeJobs: active.length, completedToday: completedToday.length, readyJobs: ready.length, customers: customers.count ?? 0, vehicles: vehicles.count ?? 0, lowStock: lowStock.length, outstandingInvoices: outstanding, todayRevenue: 0, pendingQuotes: quotations.count ?? 0 });
+      const [todaySales, weekSales, monthSales, recentSaleRows, saleItemRows] = await Promise.all([
+        supabase.from('sales').select('total_minor').gte('sale_date', `${today}T00:00:00`).neq('status', 'VOIDED'),
+        supabase.from('sales').select('total_minor').gte('sale_date', weekAgo.toISOString()).neq('status', 'VOIDED'),
+        supabase.from('sales').select('total_minor').gte('sale_date', monthStart.toISOString()).neq('status', 'VOIDED'),
+        supabase.from('sales').select('*').order('sale_date', { ascending: false }).limit(5),
+        supabase.from('sale_items').select('part_name,category,quantity,sales!inner(status,created_at)').gte('sales.created_at', monthStart.toISOString()).neq('sales.status', 'VOIDED').limit(200),
+      ]);
+      const itemTotals = new Map<string, { name: string; category: string | null; qty: number }>();
+      for (const item of (saleItemRows.data ?? []) as { part_name: string; category: string | null; quantity: number }[]) {
+        const entry = itemTotals.get(item.part_name) ?? { name: item.part_name, category: item.category, qty: 0 };
+        entry.qty += item.quantity; itemTotals.set(item.part_name, entry);
+      }
+      setRecentSales((recentSaleRows.data ?? []) as Sale[]);
+      setTopItems(Array.from(itemTotals.values()).sort((a, b) => b.qty - a.qty).slice(0, 5));
+      setStats({
+        activeJobs: active.length, completedToday: completedToday.length, readyJobs: ready.length,
+        customers: customers.count ?? 0, vehicles: vehicles.count ?? 0, lowStock: lowStock.length,
+        outOfStock: outOfStock.length, outstandingInvoices: outstanding, todayRevenue: 0,
+        pendingQuotes: quotations.count ?? 0,
+        todaySales: ((todaySales.data ?? []) as Sale[]).reduce((s, sale) => s + sale.total_minor, 0),
+        weekSales: ((weekSales.data ?? []) as Sale[]).reduce((s, sale) => s + sale.total_minor, 0),
+        monthSales: ((monthSales.data ?? []) as Sale[]).reduce((s, sale) => s + sale.total_minor, 0),
+      });
       const statusCounts: Record<string, number> = {};
       jobData.forEach((j) => { statusCounts[j.status] = (statusCounts[j.status] ?? 0) + 1; });
       setJobStatusData(Object.entries(statusCounts).map(([status, count]) => ({ status, count })));
       const days: { day: string; amount: number }[] = [];
-      for (let i = 6; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); days.push({ day: d.toLocaleDateString('en', { weekday: 'short' }), amount: Math.floor(Math.random() * 50000) + 10000 }); }
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i);
+        const dayKey = d.toISOString().slice(0, 10);
+        const { data } = await supabase.from('sales').select('total_minor').gte('sale_date', `${dayKey}T00:00:00`).lt('sale_date', `${dayKey}T23:59:59`).neq('status', 'VOIDED');
+        days.push({ day: d.toLocaleDateString('en', { weekday: 'short' }), amount: ((data ?? []) as Sale[]).reduce((s, sale) => s + sale.total_minor, 0) });
+      }
       setRevenueData(days);
     })();
   }, []);
@@ -974,7 +1108,7 @@ function TechniciansSection() {
 }
 
 // === PARTS / INVENTORY ===
-function PartsSection({ onNew, onReceive, onAdjust, can }: { onNew: () => void; onReceive: () => void; onAdjust: () => void; can: (p: string) => boolean }) {
+function PartsSection({ onNew, onReceive, onAdjust, onSelect, can }: { onNew: () => void; onReceive: () => void; onAdjust: () => void; onSelect: (id: string) => void; can: (p: string) => boolean }) {
   const [parts, setParts] = useState<Part[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -992,8 +1126,42 @@ function PartsSection({ onNew, onReceive, onAdjust, can }: { onNew: () => void; 
       {can('inventory.receive') && <button className="button secondary small" onClick={onReceive}><Plus size={15} /> Receive stock</button>}
       {can('inventory.adjust') && <button className="button secondary small" onClick={onAdjust}><Edit size={15} /> Adjust stock</button>}
     </div>
-    {loading ? <Loading /> : parts.length === 0 ? <Empty title="No parts" text="Add your first part to inventory." /> : <div className="data-table">{parts.map((p) => <div className="table-row" key={p.id}><div className="job-icon"><Package size={17} /></div><div><strong>{p.name}</strong><span>{p.sku} · {p.brand ?? 'No brand'}</span></div><span className="table-muted">{formatKes(p.selling_price_minor)}</span><span className={`status ${p.quantity_on_hand <= p.reorder_level ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>{p.quantity_on_hand} in stock</span></div>)}</div>}
+    {loading ? <Loading /> : parts.length === 0 ? <Empty title="No parts" text="Add your first part to inventory." /> : <div className="data-table">{parts.map((p) => <div className="table-row clickable" key={p.id} onClick={() => onSelect(p.id)}><div className="job-icon"><Package size={17} /></div><div><strong>{p.name}</strong><span>{p.sku} · {p.brand ?? 'No brand'}</span></div><span className="table-muted">Buy {formatKes(p.cost_price_minor)} · Sell {formatKes(p.selling_price_minor)}</span><span className={`status ${p.quantity_on_hand <= p.reorder_level ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>{p.quantity_on_hand} in stock</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
   </SectionPanel>;
+}
+
+function PartDetail({ id, onBack }: { id: string; onBack: () => void }) {
+  const [part, setPart] = useState<Part | null>(null);
+  const [movements, setMovements] = useState<StockMovement[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    (async () => {
+      const [{ data: partData }, { data: movementData }] = await Promise.all([
+        supabase.from('parts').select('*').eq('id', id).maybeSingle(),
+        supabase.from('stock_movements').select('*').eq('part_id', id).order('created_at', { ascending: false }).limit(20),
+      ]);
+      setPart(partData as Part | null); setMovements((movementData ?? []) as StockMovement[]); setLoading(false);
+    })();
+  }, [id]);
+  if (loading) return <Loading />;
+  if (!part) return <><BackBar onBack={onBack} label="Parts" /><Empty title="Part not found" text="This part may have been removed." /></>;
+  const stockValue = part.cost_price_minor * part.quantity_on_hand;
+  const margin = part.selling_price_minor - part.cost_price_minor;
+  return <>
+    <BackBar onBack={onBack} label="Parts" />
+    <div className="detail-header"><div className="detail-avatar"><Package size={24} /></div><div className="flex-1"><h2>{part.name}</h2><p className="muted">{part.sku} · {part.category}{part.brand ? ` · ${part.brand}` : ''}</p></div><span className={`status ${part.quantity_on_hand <= part.reorder_level ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>{part.quantity_on_hand} in stock</span></div>
+    <div className="detail-info-grid">
+      <div className="info-card"><CircleDollarSign size={16} /> <div><span>Buying price</span><strong>{formatKes(part.cost_price_minor)}</strong></div></div>
+      <div className="info-card"><CircleDollarSign size={16} /> <div><span>Selling price</span><strong>{formatKes(part.selling_price_minor)}</strong></div></div>
+      <div className="info-card"><TrendingUp size={16} /> <div><span>Margin per unit</span><strong>{formatKes(margin)}</strong></div></div>
+      <div className="info-card"><Boxes size={16} /> <div><span>Stock value (cost)</span><strong>{formatKes(stockValue)}</strong></div></div>
+      <div className="info-card"><Package size={16} /> <div><span>Quantity on hand</span><strong>{part.quantity_on_hand}</strong></div></div>
+      <div className="info-card"><AlertTriangle size={16} /> <div><span>Reorder level</span><strong>{part.reorder_level}</strong></div></div>
+      {part.location && <div className="info-card"><MapPin size={16} /> <div><span>Location</span><strong>{part.location}</strong></div></div>}
+      <div className="info-card"><ShieldCheck size={16} /> <div><span>Status</span><strong>{part.active ? 'Active' : 'Inactive'}</strong></div></div>
+    </div>
+    <section className="panel" style={{ marginTop: 20 }}><div className="panel-heading"><div><p className="eyebrow">Audit trail</p><h3>Recent stock movements</h3></div></div>{movements.length === 0 ? <Empty title="No stock movements" text="Movements for this part will appear here." /> : <div className="data-table">{movements.map((m) => <div className="table-row" key={m.id}><div className="job-icon"><Boxes size={17} /></div><div><strong>{m.movement_type.replaceAll('_', ' ')}</strong><span>{m.reference ?? '—'} · {formatDateTime(m.created_at)}</span></div><span className="table-muted">{m.previous_balance} → {m.new_balance}</span><span className={`status ${m.quantity >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>{m.quantity >= 0 ? '+' : ''}{m.quantity}</span></div>)}</div>}</section>
+  </>;
 }
 
 function StockMovementsSection() {
@@ -1509,11 +1677,12 @@ function ServiceForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: s
 }
 
 function PartForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string) => void }) {
-  const [sku, setSku] = useState(''); const [name, setName] = useState(''); const [category, setCategory] = useState('General'); const [brand, setBrand] = useState(''); const [costPrice, setCostPrice] = useState('0'); const [sellPrice, setSellPrice] = useState('0'); const [qty, setQty] = useState('0'); const [reorder, setReorder] = useState('0'); const [location, setLocation] = useState(''); const [busy, setBusy] = useState(false);
-  async function submit(e: FormEvent) { e.preventDefault(); setBusy(true); const { error: partError } = await supabase.from('parts').insert({ sku, name, category, brand: brand || null, cost_price_minor: Math.round(parseFloat(costPrice) * 100), selling_price_minor: Math.round(parseFloat(sellPrice) * 100), quantity_on_hand: parseInt(qty), reorder_level: parseInt(reorder), location: location || null });
+  const [sku, setSku] = useState(''); const [name, setName] = useState(''); const [category, setCategory] = useState('General'); const [brand, setBrand] = useState(''); const [supplierId, setSupplierId] = useState(''); const [suppliers, setSuppliers] = useState<Supplier[]>([]); const [costPrice, setCostPrice] = useState('0'); const [sellPrice, setSellPrice] = useState('0'); const [qty, setQty] = useState('0'); const [reorder, setReorder] = useState('0'); const [location, setLocation] = useState(''); const [busy, setBusy] = useState(false);
+  useEffect(() => { supabase.from('suppliers').select('*').eq('status', 'ACTIVE').is('deleted_at', null).order('name').then(({ data }) => setSuppliers((data ?? []) as Supplier[])); }, []);
+  async function submit(e: FormEvent) { e.preventDefault(); setBusy(true); const { error: partError } = await supabase.from('parts').insert({ sku, name, category, brand: brand || null, supplier_id: supplierId || null, cost_price_minor: Math.round(parseFloat(costPrice) * 100), selling_price_minor: Math.round(parseFloat(sellPrice) * 100), quantity_on_hand: parseInt(qty), reorder_level: parseInt(reorder), location: location || null });
     if (partError) { setBusy(false); onSaved('Unable to save part. Please try again.'); return; }
     onSaved('Part added successfully.'); }
-  return <Modal title="Add part" onClose={onClose}><form onSubmit={submit} className="modal-form"><label>SKU<input value={sku} onChange={(e) => setSku(e.target.value)} required placeholder="e.g. BP-001" /></label><label>Part name<input value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Brake pads" /></label><div className="form-row"><label>Category<input value={category} onChange={(e) => setCategory(e.target.value)} /></label><label>Brand<input value={brand} onChange={(e) => setBrand(e.target.value)} /></label></div><div className="form-row"><label>Cost price (KES)<input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} required min="0" step="0.01" /></label><label>Selling price (KES)<input type="number" value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} required min="0" step="0.01" /></label></div><div className="form-row"><label>Quantity on hand<input type="number" value={qty} onChange={(e) => setQty(e.target.value)} required min="0" /></label><label>Reorder level<input type="number" value={reorder} onChange={(e) => setReorder(e.target.value)} required min="0" /></label></div><label>Location/bin<input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Shelf A-3" /></label><button className="button primary wide" disabled={busy}>{busy ? 'Saving...' : 'Save part'} <ArrowUpRight size={16} /></button></form></Modal>;
+  return <Modal title="Add part" onClose={onClose}><form onSubmit={submit} className="modal-form"><label>SKU<input value={sku} onChange={(e) => setSku(e.target.value)} required placeholder="e.g. BP-001" /></label><label>Part name<input value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Brake pads" /></label><div className="form-row"><label>Category<input value={category} onChange={(e) => setCategory(e.target.value)} /></label><label>Brand<input value={brand} onChange={(e) => setBrand(e.target.value)} /></label></div><label>Supplier<span className="optional">Optional</span><select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}><option value="">No supplier</option>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label><div className="form-row"><label>Cost price (KES)<input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} required min="0" step="0.01" /></label><label>Selling price (KES)<input type="number" value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} required min="0" step="0.01" /></label></div><div className="form-row"><label>Quantity on hand<input type="number" value={qty} onChange={(e) => setQty(e.target.value)} required min="0" /></label><label>Reorder level<input type="number" value={reorder} onChange={(e) => setReorder(e.target.value)} required min="0" /></label></div><label>Location/bin<input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Shelf A-3" /></label><button className="button primary wide" disabled={busy}>{busy ? 'Saving...' : 'Save part'} <ArrowUpRight size={16} /></button></form></Modal>;
 }
 
 function SupplierForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string) => void }) {

@@ -46,6 +46,11 @@ export type Part = {
   name: string;
   category: string;
   brand: string | null;
+  vehicle_make: string | null;
+  vehicle_model: string | null;
+  model_year_version: string | null;
+  compatible_vehicle: string | null;
+  supplier_id: string | null;
   cost_price_minor: number;
   selling_price_minor: number;
   quantity_on_hand: number;
@@ -268,6 +273,44 @@ export type StockMovement = {
   unit_cost_minor: number;
   reason: string | null;
   reference: string | null;
+  created_at: string;
+};
+
+export type Sale = {
+  id: string;
+  sale_number: string;
+  sale_date: string;
+  customer_name: string | null;
+  customer_phone: string | null;
+  customer_type: 'WALK_IN' | 'VEHICLE_OWNER' | 'BUSINESS' | 'GARAGE_WORKSHOP' | 'OTHER';
+  salesperson_id: string | null;
+  salesperson_name: string | null;
+  payment_method: 'CASH' | 'MPESA' | 'BANK' | 'CARD' | 'CREDIT' | 'JOB_CARD' | 'OTHER';
+  payment_status: 'PAID' | 'PARTIAL' | 'PENDING';
+  status: 'COMPLETED' | 'PARTIALLY_RETURNED' | 'RETURNED' | 'VOIDED';
+  subtotal_minor: number;
+  discount_minor: number;
+  total_minor: number;
+  amount_paid_minor: number;
+  balance_minor: number;
+  void_reason: string | null;
+  voided_by: string | null;
+  voided_at: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+export type SaleItem = {
+  id: string;
+  sale_id: string;
+  part_id: string;
+  part_name: string;
+  part_sku: string;
+  category: string | null;
+  quantity: number;
+  unit_price_minor: number;
+  line_total_minor: number;
+  returned_quantity: number;
   created_at: string;
 };
 
