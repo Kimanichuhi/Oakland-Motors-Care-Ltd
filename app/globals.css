@@ -29,3 +29,48 @@ button { cursor:pointer; }
 .install-banner-copy span { display:block; font-size:11px; color:#7d8a98; margin-top:3px; line-height:1.4; }
 .install-banner-close { border:0; background:none; color:#9aa7b2; flex-shrink:0; padding:4px; }
 @media print { .install-banner { display:none; } }
+
+.subtab-bar { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:20px; overflow-x:auto; }
+.subtab { border:0; background:none; padding:11px 14px; font-size:12.5px; font-weight:700; color:#8997a5; border-bottom:2px solid transparent; margin-bottom:-1px; display:flex; align-items:center; gap:7px; white-space:nowrap; flex-shrink:0; }
+.subtab.active { color:var(--navy); border-bottom-color:var(--gold); }
+.subtab:hover { color:var(--navy); }
+.sortable-th { border:0; background:none; padding:0; font:inherit; color:inherit; display:inline-flex; align-items:center; gap:4px; cursor:pointer; }
+.kpi-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:14px; margin-bottom:22px; }
+@media (max-width:700px) { .kpi-row { grid-template-columns:repeat(2, 1fr); } }
+
+/* Job card "Work Order" print view — mirrors the physical duplicate pad. */
+.work-order-sheet { max-width:1120px; }
+.work-order-page { position:relative; display:flex; gap:0; align-items:stretch; }
+.work-order-copy { flex:1; min-width:0; border:1.5px solid var(--navy); border-radius:10px; padding:14px; font-size:10px; color:#1c2733; }
+.wo-cut-divider { width:26px; flex-shrink:0; border-left:1px dashed #9aa7b4; display:flex; align-items:center; justify-content:center; color:#9aa7b4; }
+.wo-header { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:10px; }
+.wo-brand { display:flex; align-items:center; gap:10px; }
+.wo-brand img { height:38px; }
+.wo-brand h1 { font-family:var(--font-sans); font-size:20px; color:var(--navy); letter-spacing:-0.02em; margin:0; }
+.wo-meta-box { border:1px solid var(--line); border-radius:6px; padding:6px 10px; font-size:9px; min-width:140px; }
+.wo-meta-box div { display:flex; justify-content:space-between; gap:14px; padding:2px 0; }
+.wo-meta-box span { color:#8997a5; }
+.wo-row { display:flex; gap:8px; margin-bottom:8px; align-items:stretch; }
+.wo-section { border:1px solid var(--line); border-radius:6px; overflow:hidden; margin-bottom:8px; }
+.wo-row .wo-section { margin-bottom:0; display:flex; flex-direction:column; }
+.wo-section h5 { background:var(--navy); color:white; margin:0; padding:4px 8px; font-size:9px; letter-spacing:.03em; }
+.wo-fields { padding:6px 8px; }
+.wo-field-row { display:flex; justify-content:space-between; gap:14px; padding:3px 0; border-bottom:1px solid #f0f2f4; font-size:9.5px; }
+.wo-field-row:last-child { border-bottom:0; }
+.wo-lines { min-height:36px; margin:0; padding:8px; font-size:9.5px; }
+.wo-lines-tall { min-height:44px; }
+.wo-table { width:100%; border-collapse:collapse; font-size:9px; }
+.wo-table th, .wo-table td { border:1px solid var(--line); padding:3px 5px; text-align:left; }
+.wo-table th { background:#f7f9fa; font-size:8px; text-transform:uppercase; letter-spacing:.03em; color:#69798a; }
+.wo-table .wo-shaded { background:#e7eef7; }
+.wo-table tfoot td { font-weight:800; }
+.wo-charges { padding:8px; }
+.wo-charges div { display:flex; justify-content:space-between; padding:3px 0; border-bottom:1px solid #f0f2f4; font-size:9.5px; }
+.wo-charges .wo-total { border-bottom:0; border-top:1px solid var(--line); margin-top:2px; padding-top:5px; font-weight:800; }
+.wo-signature-line { padding:8px; margin:0; font-size:9.5px; }
+.wo-checkbox-row { display:flex; align-items:center; gap:10px; font-size:9.5px; flex-wrap:wrap; padding:0 8px 8px; }
+.wo-checkbox-row label { display:flex; align-items:center; gap:4px; }
+@media print {
+  @page work-order { size:A4 landscape; margin:10mm; }
+  .work-order-sheet { page:work-order; }
+}

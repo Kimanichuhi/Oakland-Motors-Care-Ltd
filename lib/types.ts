@@ -83,6 +83,7 @@ export type JobCard = {
   priority: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
   status: string;
   job_types: string[];
+  other_charges_minor: number;
   promised_at: string | null;
   received_at: string | null;
   released_at: string | null;
@@ -361,6 +362,193 @@ export type BusinessSettings = {
   job_card_prefix: string;
   receipt_prefix: string;
   job_card_terms: string;
+};
+
+export type ScrapItem = {
+  id: string;
+  name: string;
+  current_rate_minor: number | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type StockCycle = {
+  id: string;
+  scrap_item_id: string;
+  cycle_number: number;
+  opening_quantity: number;
+  opening_date: string;
+  current_quantity: number;
+  closing_quantity: number | null;
+  closing_date: string | null;
+  status: 'OPEN' | 'CLOSED';
+  notes: string | null;
+  created_at: string;
+};
+
+export type ScrapCurrentStockRow = {
+  scrap_item_id: string;
+  name: string;
+  current_rate_minor: number | null;
+  active: boolean;
+  stock_cycle_id: string | null;
+  cycle_number: number | null;
+  opening_quantity: number | null;
+  opening_date: string | null;
+  current_quantity: number;
+};
+
+export type ScrapDailyRecord = {
+  id: string;
+  date: string;
+  previous_closing_cash_minor: number;
+  cash_added_minor: number;
+  cash_available_minor: number;
+  total_kg_purchased: number;
+  total_scrap_purchase_minor: number;
+  total_expenses_minor: number;
+  closing_cash_minor: number;
+  has_discrepancy: boolean;
+  notes: string | null;
+  status: 'ACTIVE' | 'VOID';
+  void_reason: string | null;
+  voided_by: string | null;
+  voided_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ScrapPurchase = {
+  id: string;
+  daily_record_id: string | null;
+  scrap_item_id: string;
+  stock_cycle_id: string;
+  rate_used_minor: number;
+  opening_stock: number;
+  quantity_purchased: number;
+  purchase_amount_minor: number;
+  closing_stock: number;
+  date: string;
+  change_in_days: number;
+  supplier: string | null;
+  notes: string | null;
+  status: 'ACTIVE' | 'VOID';
+  void_reason: string | null;
+  voided_by: string | null;
+  voided_at: string | null;
+  created_by: string | null;
+  created_by_name: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ScrapExpense = {
+  id: string;
+  daily_record_id: string | null;
+  category: string;
+  amount_minor: number;
+  description: string | null;
+  date: string;
+  change_in_days: number;
+  notes: string | null;
+  status: 'ACTIVE' | 'VOID';
+  void_reason: string | null;
+  voided_by: string | null;
+  voided_at: string | null;
+  created_by: string | null;
+  created_by_name: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CashTransaction = {
+  id: string;
+  date: string;
+  change_in_days: number;
+  transaction_type: 'CASH_ADDED' | 'ADJUSTMENT';
+  amount_minor: number;
+  added_by: string | null;
+  reason: string | null;
+  reference: string | null;
+  notes: string | null;
+  status: 'ACTIVE' | 'VOID';
+  void_reason: string | null;
+  voided_by: string | null;
+  voided_at: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ScrapCashSummary = {
+  date: string;
+  opening_cash_minor: number;
+  cash_added_minor: number;
+  purchases_minor: number;
+  expenses_minor: number;
+  adjustments_minor: number;
+  closing_cash_minor: number;
+  total_kg_purchased: number;
+  has_discrepancy: boolean;
+  updated_at: string;
+};
+
+export type ScrapStockAdjustment = {
+  id: string;
+  scrap_item_id: string;
+  stock_cycle_id: string;
+  date: string;
+  adjustment_type: 'CLEARANCE' | 'OPENING' | 'CORRECTION_INCREASE' | 'CORRECTION_DECREASE';
+  quantity: number;
+  previous_stock: number;
+  resulting_stock: number;
+  reason: string;
+  authorized_by: string;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+export type ScrapClearanceSale = {
+  id: string;
+  stock_adjustment_id: string;
+  amount_minor: number;
+  buyer: string | null;
+  reference: string | null;
+  notes: string | null;
+  recorded_by: string | null;
+  created_at: string;
+};
+
+export type ScrapSettings = {
+  id: boolean;
+  opening_cash_minor: number | null;
+  opening_cash_date: string | null;
+  opening_notes: string | null;
+  established_by: string | null;
+  established_at: string | null;
+};
+
+export type VehicleRegisterEntry = {
+  id: string;
+  date: string;
+  registration_number: string;
+  make_model: string;
+  time_in: string;
+  time_out: string | null;
+  status: 'ACTIVE' | 'VOID';
+  void_reason: string | null;
+  voided_by: string | null;
+  voided_at: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type Role = { id: string; name: string; label: string };

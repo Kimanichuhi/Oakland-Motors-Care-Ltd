@@ -10,6 +10,8 @@ export const PERMISSIONS = [
   'invoice.view','invoice.create','invoice.update','invoice.void',
   'payment.view','payment.create','payment.reverse',
   'report.view','report.export','audit.view','settings.manage','users.manage',
+  'scrap.view','scrap.record','scrap.manage',
+  'vehicle_register.view','vehicle_register.record','vehicle_register.manage',
 ] as const;
 
 export type PermissionKey = typeof PERMISSIONS[number];
@@ -110,6 +112,10 @@ export const QUOTATION_STATUSES = ['DRAFT','SENT','PENDING_APPROVAL','APPROVED',
 
 export const INVOICE_STATUSES = ['DRAFT','ISSUED','PART_PAID','PAID','OVERDUE','VOID'] as const;
 
+export const SCRAP_EXPENSE_CATEGORIES = ['Water','Transaction / Withdrawal Fees','Transport','Loading','Other'] as const;
+export const STOCK_ADJUSTMENT_TYPES = ['CLEARANCE','OPENING','CORRECTION_INCREASE','CORRECTION_DECREASE'] as const;
+export const STOCK_CYCLE_STATUSES = ['OPEN','CLOSED'] as const;
+
 export const statusStyles: Record<string, string> = {
   RECEIVED: 'bg-amber-50 text-amber-700',
   INSPECTION: 'bg-cyan-50 text-cyan-700',
@@ -147,4 +153,9 @@ export const statusStyles: Record<string, string> = {
   PARTIALLY_RETURNED: 'bg-amber-50 text-amber-700',
   RETURNED: 'bg-sky-50 text-sky-700',
   VOIDED: 'bg-slate-100 text-slate-500',
+  OPEN: 'bg-emerald-50 text-emerald-700',
+  CLEARANCE: 'bg-amber-50 text-amber-700',
+  OPENING: 'bg-sky-50 text-sky-700',
+  CORRECTION_INCREASE: 'bg-emerald-50 text-emerald-700',
+  CORRECTION_DECREASE: 'bg-red-50 text-red-700',
 };

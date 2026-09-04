@@ -11,17 +11,19 @@ import {
   LayoutDashboard, LogOut, Menu, Package, Plus, Search, Settings, ShieldCheck, Sparkles, Users,
   Wrench, X, FileText, Truck, ShoppingCart, Receipt, ScrollText, UserCog, AlertTriangle,
   TrendingUp, Download, Eye, Edit, Archive, Trash2, Phone, Mail, MapPin, Filter, ChevronRight,
-  Briefcase, Boxes, Store, Banknote, Smartphone, FileCheck, Clock, Activity, Calendar, Printer,
+  Briefcase, Boxes, Store, Banknote, Smartphone, FileCheck, Clock, Activity, Calendar, Printer, Recycle, DoorOpen, Scissors,
 } from 'lucide-react';
 
 import SalesSection from '@/components/sales/SalesSection';
 import SaleDetail from '@/components/sales/SaleDetail';
 import SaleForm from '@/components/sales/SaleForm';
+import ScrapSection from '@/components/scrap/ScrapSection';
+import VehicleRegisterSection from '@/components/vehicle-register/VehicleRegisterSection';
 
 type SectionId =
-  | 'dashboard' | 'customers' | 'vehicles' | 'jobcards' | 'services' | 'technicians'
+  | 'dashboard' | 'customers' | 'vehicles' | 'vehicleregister' | 'jobcards' | 'services' | 'technicians'
   | 'sales' | 'parts' | 'stockmovements' | 'lowstock' | 'suppliers' | 'procurement'
-  | 'quotations' | 'invoices' | 'payments' | 'receipts'
+  | 'quotations' | 'invoices' | 'payments' | 'receipts' | 'scrap'
   | 'reports' | 'notifications' | 'audit' | 'settings' | 'users';
 
 const NAV_GROUPS: { label: string; items: { id: SectionId; label: string; icon: React.ReactNode; perm: string }[] }[] = [
@@ -29,6 +31,7 @@ const NAV_GROUPS: { label: string; items: { id: SectionId; label: string; icon: 
   { label: 'Operations', items: [
     { id: 'customers', label: 'Customers', icon: <Users size={18} />, perm: 'customer.view' },
     { id: 'vehicles', label: 'Vehicles', icon: <CarFront size={18} />, perm: 'vehicle.view' },
+    { id: 'vehicleregister', label: 'Vehicle Register', icon: <DoorOpen size={18} />, perm: 'vehicle_register.view' },
     { id: 'jobcards', label: 'Job Cards', icon: <ClipboardList size={18} />, perm: 'job.view' },
     { id: 'services', label: 'Services', icon: <Wrench size={18} />, perm: 'dashboard.view' },
     { id: 'technicians', label: 'Technicians', icon: <UserCog size={18} />, perm: 'job.view' },
@@ -40,6 +43,9 @@ const NAV_GROUPS: { label: string; items: { id: SectionId; label: string; icon: 
     { id: 'lowstock', label: 'Low Stock', icon: <AlertTriangle size={18} />, perm: 'inventory.view' },
     { id: 'suppliers', label: 'Suppliers', icon: <Truck size={18} />, perm: 'supplier.view' },
     { id: 'procurement', label: 'Procurement', icon: <ShoppingCart size={18} />, perm: 'purchase_order.view' },
+  ] },
+  { label: 'Scrap Yard', items: [
+    { id: 'scrap', label: 'Scrap Management', icon: <Recycle size={18} />, perm: 'scrap.view' },
   ] },
   { label: 'Finance', items: [
     { id: 'quotations', label: 'Quotations', icon: <FileText size={18} />, perm: 'quotation.view' },
@@ -280,6 +286,8 @@ function SectionRouter(props: SectionProps) {
     case 'procurement': return p.selectedPOId ? <PODetail id={p.selectedPOId} onBack={() => p.setSelectedPOId(null)} can={p.can} onNotice={p.onNotice} onRefresh={p.onRefresh} /> : <ProcurementSection onNew={() => p.setShowPOForm(true)} onSelect={(id) => p.setSelectedPOId(id)} />;
     case 'quotations': return p.selectedQuotationId ? <QuotationDetail id={p.selectedQuotationId} onBack={() => p.setSelectedQuotationId(null)} can={p.can} onNotice={p.onNotice} onRefresh={p.onRefresh} /> : <QuotationsSection onNew={() => p.setShowQuotationForm(true)} onSelect={(id) => p.setSelectedQuotationId(id)} />;
     case 'invoices': return p.selectedInvoiceId ? <InvoiceDetail id={p.selectedInvoiceId} onBack={() => p.setSelectedInvoiceId(null)} onPayment={() => p.setShowPaymentForm(true)} /> : <InvoicesSection query={p.query} onNew={() => p.setShowInvoiceForm(true)} onSelect={(id) => p.setSelectedInvoiceId(id)} />;
+    case 'scrap': return <ScrapSection can={p.can} onNotice={p.onNotice} />;
+    case 'vehicleregister': return <VehicleRegisterSection can={p.can} onNotice={p.onNotice} />;
     case 'payments': return <PaymentsSection />;
     case 'receipts': return <ReceiptsSection />;
     case 'reports': return <ReportsSection />;
@@ -694,6 +702,7 @@ function JobDetail({ id, onBack, can, onNotice, onRefresh, onNewQuotation, onNew
   const [qcChecklist, setQcChecklist] = useState<Record<string, boolean>>({}); const [qcResult, setQcResult] = useState<'PASSED' | 'FAILED' | 'REWORK_REQUIRED'>('PASSED'); const [qcNotes, setQcNotes] = useState('');
   const [signoffName, setSignoffName] = useState<Record<string, string>>({});
   const [showPrint, setShowPrint] = useState(false);
+  const [showWorkOrder, setShowWorkOrder] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -772,6 +781,12 @@ function JobDetail({ id, onBack, can, onNotice, onRefresh, onNewQuotation, onNew
     if (!name) return;
     const { error } = await supabase.from('job_card_signoffs').insert({ job_card_id: id, role, name });
     onNotice(error ? 'Unable to record sign-off.' : 'Sign-off recorded.'); reload();
+  }
+
+  async function updateJobDetails(patch: Partial<Pick<JobCard, 'job_types' | 'recommended_work' | 'other_charges_minor'>>) {
+    const { error } = await supabase.from('job_cards').update(patch).eq('id', id);
+    onNotice(error ? 'Unable to update the work order.' : 'Work order updated.');
+    onRefresh(); reload();
   }
 
   async function reload() {
@@ -927,38 +942,155 @@ function JobDetail({ id, onBack, can, onNotice, onRefresh, onNewQuotation, onNew
       <section className="panel">
         <div className="panel-heading"><div><p className="eyebrow">Billing</p><h3>Financial actions</h3></div></div>
         <div className="action-buttons">
+          {can('job.update') && <button className="button primary" onClick={() => setShowWorkOrder(true)}><ClipboardList size={16} /> Fill Work Order</button>}
           {can('quotation.create') && <button className="button secondary" onClick={onNewQuotation}><FileText size={16} /> Create quotation</button>}
           {can('invoice.create') && <button className="button secondary" onClick={onNewInvoice}><CircleDollarSign size={16} /> Create invoice</button>}
           {can('job.view') && <button className="button secondary" onClick={() => setShowPrint(true)}><Printer size={16} /> Print / Preview</button>}
         </div>
-        <div className="total-row"><strong>Job total</strong><span>{formatKes(labourTotal + partsTotal)}</span></div>
+        <div className="total-row"><strong>Job total</strong><span>{formatKes(labourTotal + partsTotal + job.other_charges_minor)}</span></div>
       </section>
     </div>
     {showPrint && <JobCardPrintView job={job} labourTotal={labourTotal} partsTotal={partsTotal} onClose={() => setShowPrint(false)} />}
+    {showWorkOrder && <WorkOrderDialog
+      job={job} parts={parts} employees={employees} can={can} onClose={() => setShowWorkOrder(false)}
+      partId={partId} setPartId={setPartId} partQty={partQty} setPartQty={setPartQty} addPart={addPart}
+      labourDesc={labourDesc} setLabourDesc={setLabourDesc} labourPrice={labourPrice} setLabourPrice={setLabourPrice} addLabour={addLabour}
+      signoffName={signoffName} setSignoffName={setSignoffName} recordSignoff={recordSignoff}
+      onSaveDetails={updateJobDetails} onNewInvoice={onNewInvoice} labourTotal={labourTotal} partsTotal={partsTotal}
+    />}
   </>;
 }
 
-// === JOB CARD PRINT / PDF VIEW ===
-type CopyMode = 'CUSTOMER' | 'WORKSHOP' | 'BLANK';
-const COPY_LABELS: Record<CopyMode, string> = { CUSTOMER: 'Customer copy', WORKSHOP: 'Workshop copy', BLANK: 'Blank template' };
+// === WORK ORDER DIALOG — collects the same fields as the physical Work Order pad ===
+function WorkOrderDialog({
+  job, parts, employees, can, onClose,
+  partId, setPartId, partQty, setPartQty, addPart,
+  labourDesc, setLabourDesc, labourPrice, setLabourPrice, addLabour,
+  signoffName, setSignoffName, recordSignoff,
+  onSaveDetails, onNewInvoice, labourTotal, partsTotal,
+}: {
+  job: JobDetailData; parts: Part[]; employees: Employee[]; can: (p: string) => boolean; onClose: () => void;
+  partId: string; setPartId: (v: string) => void; partQty: string; setPartQty: (v: string) => void; addPart: (e: FormEvent) => void;
+  labourDesc: string; setLabourDesc: (v: string) => void; labourPrice: string; setLabourPrice: (v: string) => void; addLabour: (e: FormEvent) => void;
+  signoffName: Record<string, string>; setSignoffName: (fn: (prev: Record<string, string>) => Record<string, string>) => void; recordSignoff: (role: string) => void;
+  onSaveDetails: (patch: Partial<Pick<JobCard, 'job_types' | 'recommended_work' | 'other_charges_minor'>>) => void;
+  onNewInvoice: () => void; labourTotal: number; partsTotal: number;
+}) {
+  const [jobTypes, setJobTypes] = useState<string[]>(job.job_types);
+  const [jobDone, setJobDone] = useState(job.recommended_work ?? '');
+  const [otherCharges, setOtherCharges] = useState((job.other_charges_minor / 100).toString());
+  const [savingDetails, setSavingDetails] = useState(false);
 
-function JobCardPrintView({ job, labourTotal, partsTotal, onClose }: { job: JobDetailData; labourTotal: number; partsTotal: number; onClose: () => void }) {
-  const [settings, setSettings] = useState<BusinessSettings | null>(null);
-  const [copyMode, setCopyMode] = useState<CopyMode>('CUSTOMER');
-  useEffect(() => { supabase.from('business_settings').select('*').limit(1).single().then(({ data }) => setSettings(data as BusinessSettings)); }, []);
+  function toggleJobType(key: string) {
+    setJobTypes((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
 
-  const blank = copyMode === 'BLANK';
-  const workshop = copyMode === 'WORKSHOP';
-  const field = (label: string, value: string | null | undefined) => (
-    <div className="print-field"><span>{label}</span>{blank || !value ? <div className="fill-line" /> : <strong>{value}</strong>}</div>
+  async function saveDetails() {
+    setSavingDetails(true);
+    await onSaveDetails({ job_types: jobTypes, recommended_work: jobDone || null, other_charges_minor: Math.round((parseFloat(otherCharges) || 0) * 100) });
+    setSavingDetails(false);
+  }
+
+  const technicianSignoff = job.job_card_signoffs.find((s) => s.role === 'TECHNICIAN');
+  const otherChargesMinor = Math.round((parseFloat(otherCharges) || 0) * 100);
+  const total = labourTotal + partsTotal + otherChargesMinor;
+  const invoice = job.invoices?.[0];
+  const lastPayment = invoice ? [...(invoice.payments ?? [])].sort((a, b) => b.paid_at.localeCompare(a.paid_at))[0] : undefined;
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" style={{ width: 'min(720px, 100%)' }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-heading"><div><p className="eyebrow">Work order</p><h2>{job.job_number}</h2></div><button className="close-button" onClick={onClose}><X size={18} /></button></div>
+
+        <div className="modal-form">
+          <div className="detail-info-grid">
+            <div className="info-card"><CarFront size={16} /><div><span>Reg. No.</span><strong>{job.vehicles?.registration_number ?? '—'}</strong></div></div>
+            <div className="info-card"><Wrench size={16} /><div><span>Make / Model</span><strong>{job.vehicles ? `${job.vehicles.make} ${job.vehicles.model}` : '—'}</strong></div></div>
+            <div className="info-card"><Users size={16} /><div><span>Customer</span><strong>{job.customers?.full_name ?? '—'}</strong></div></div>
+            <div className="info-card"><Phone size={16} /><div><span>Phone</span><strong>{job.customers?.phone ?? '—'}</strong></div></div>
+          </div>
+
+          <section>
+            <p className="eyebrow">1. Job type</p>
+            <div className="job-type-grid">{JOB_TYPE_META.map((t) => {
+              const Icon = JOB_TYPE_ICONS[t.key] ?? Wrench;
+              const active = jobTypes.includes(t.key);
+              return <button type="button" key={t.key} className={`job-type-card${active ? ' selected' : ''}`} onClick={() => toggleJobType(t.key)}>
+                <Icon size={18} />
+                <div><strong>{t.label}</strong><span>{t.description}</span></div>
+                {active && <CheckCircle2 size={16} className="job-type-check" />}
+              </button>;
+            })}</div>
+          </section>
+
+          <section>
+            <p className="eyebrow">2. Parts used</p>
+            {(job.job_card_parts ?? []).length === 0 ? <div className="empty"><strong>No parts issued</strong></div> : <div className="data-table">
+              {job.job_card_parts.map((p) => <div className="table-row" key={p.id}><div><strong>{p.parts?.name ?? 'Part'}</strong><span>{p.parts?.sku}</span></div><span className="table-muted">{p.quantity} × {formatKes(p.unit_price_minor)}</span><span className="table-muted">{formatKes(computeLineTotal(p.quantity, p.unit_price_minor, 16))}</span></div>)}
+            </div>}
+            {can('inventory.issue') && <form onSubmit={addPart} className="form-row" style={{ marginTop: 10, gridTemplateColumns: '1fr 80px auto' }}>
+              <select value={partId} onChange={(e) => setPartId(e.target.value)} required><option value="">Select part...</option>{parts.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.quantity_on_hand} in stock)</option>)}</select>
+              <input type="number" value={partQty} onChange={(e) => setPartQty(e.target.value)} min="1" required />
+              <button className="button primary small" type="submit"><Plus size={15} /> Add</button>
+            </form>}
+          </section>
+
+          <section>
+            <p className="eyebrow">3. Job done</p>
+            <textarea value={jobDone} onChange={(e) => setJobDone(e.target.value)} placeholder="Describe the work carried out..." style={{ minHeight: 70 }} />
+          </section>
+
+          <section>
+            <p className="eyebrow">4. Charges</p>
+            <div className="status-row"><strong>Labour</strong><span>{formatKes(labourTotal)}</span></div>
+            {can('job.update') && <form onSubmit={addLabour} className="form-row" style={{ margin: '8px 0', gridTemplateColumns: '1fr 100px auto' }}>
+              <input value={labourDesc} onChange={(e) => setLabourDesc(e.target.value)} placeholder="Labour description" required />
+              <input type="number" value={labourPrice} onChange={(e) => setLabourPrice(e.target.value)} min="0" step="0.01" required />
+              <button className="button secondary small" type="submit"><Plus size={15} /></button>
+            </form>}
+            <div className="status-row"><strong>Parts</strong><span>{formatKes(partsTotal)}</span></div>
+            <div className="status-row"><strong>Other</strong><input type="number" min={0} step="0.01" value={otherCharges} onChange={(e) => setOtherCharges(e.target.value)} style={{ width: 110, textAlign: 'right' }} /></div>
+            <div className="status-row"><strong>Total</strong><span style={{ fontWeight: 800 }}>{formatKes(total)}</span></div>
+          </section>
+
+          <section>
+            <p className="eyebrow">5. Completion</p>
+            <div className="form-row">
+              <label>Technician
+                {technicianSignoff ? <input value={technicianSignoff.name} disabled /> : (
+                  <select value={signoffName.TECHNICIAN ?? ''} onChange={(e) => setSignoffName((prev) => ({ ...prev, TECHNICIAN: e.target.value }))}>
+                    <option value="">Select technician...</option>
+                    {employees.map((e) => <option key={e.id} value={e.full_name}>{e.full_name}</option>)}
+                  </select>
+                )}
+              </label>
+              <label>Payment<input value={!invoice ? 'No invoice yet' : lastPayment ? `${lastPayment.method} · ${formatKes(lastPayment.amount_minor)}` : 'Awaiting payment'} disabled /></label>
+            </div>
+            <div className="action-buttons">
+              {!technicianSignoff && can('job.update') && <button type="button" className="button secondary small" disabled={!signoffName.TECHNICIAN} onClick={() => recordSignoff('TECHNICIAN')}>Record technician</button>}
+              {!invoice && can('invoice.create') && <button type="button" className="button secondary small" onClick={onNewInvoice}>Create invoice</button>}
+            </div>
+          </section>
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="button secondary" type="button" onClick={onClose}>Close</button>
+            {can('job.update') && <button className="button primary wide" type="button" disabled={savingDetails} onClick={() => void saveDetails()}>{savingDetails ? 'Saving…' : 'Save Work Order'}</button>}
+          </div>
+        </div>
+      </div>
+    </div>
   );
+}
+
+// === JOB CARD PRINT / PDF VIEW — matches the physical duplicate Work Order pad ===
+function JobCardPrintView({ job, labourTotal, partsTotal, onClose }: { job: JobDetailData; labourTotal: number; partsTotal: number; onClose: () => void }) {
+  const [blank, setBlank] = useState(false);
 
   return <div className="print-overlay">
     <div className="print-toolbar no-print">
       <div className="action-buttons">
-        <button className={`button ${copyMode === 'CUSTOMER' ? 'primary' : 'secondary'} small`} onClick={() => setCopyMode('CUSTOMER')}>Customer copy</button>
-        <button className={`button ${copyMode === 'WORKSHOP' ? 'primary' : 'secondary'} small`} onClick={() => setCopyMode('WORKSHOP')}>Workshop copy</button>
-        <button className={`button ${copyMode === 'BLANK' ? 'primary' : 'secondary'} small`} onClick={() => setCopyMode('BLANK')}>Blank template</button>
+        <button className={`button ${!blank ? 'primary' : 'secondary'} small`} onClick={() => setBlank(false)}>Filled work order</button>
+        <button className={`button ${blank ? 'primary' : 'secondary'} small`} onClick={() => setBlank(true)}>Blank template</button>
       </div>
       <div className="action-buttons">
         <button className="button primary small" onClick={() => window.print()}><Printer size={15} /> Print / Save as PDF</button>
@@ -966,113 +1098,109 @@ function JobCardPrintView({ job, labourTotal, partsTotal, onClose }: { job: JobD
       </div>
     </div>
 
-    <div id="print-area" className="print-sheet">
-      <div className="print-header">
-        <div>
-          {settings?.logo_url ? <img src={settings.logo_url} alt={settings.business_name} /> : <img src="/logo.png" alt="Oakland Motor Care Ltd" style={{ height: 44 }} />}
-          <h1>{settings?.business_name ?? 'Oakland Motor Care Ltd'}</h1>
-          <p className="muted">{settings?.address ?? ''}</p>
-          <p className="muted">{[settings?.phone, settings?.email].filter(Boolean).join(' · ')}</p>
+    <div id="print-area" className="print-sheet work-order-sheet">
+      <div className="work-order-page">
+        <WorkOrderCopy job={job} labourTotal={labourTotal} partsTotal={partsTotal} blank={blank} />
+        <div className="wo-cut-divider" aria-hidden="true"><Scissors size={16} /></div>
+        <WorkOrderCopy job={job} labourTotal={labourTotal} partsTotal={partsTotal} blank={blank} />
+      </div>
+    </div>
+  </div>;
+}
+
+function WorkOrderCopy({ job, labourTotal, partsTotal, blank }: { job: JobDetailData; labourTotal: number; partsTotal: number; blank: boolean }) {
+  const technicianName = job.job_card_signoffs.find((s) => s.role === 'TECHNICIAN')?.name;
+  const jobDone = job.job_card_work_items?.filter((w) => w.status === 'COMPLETED').map((w) => w.description).join('; ') || job.recommended_work || '';
+  const lastPayment = !blank ? job.invoices.flatMap((inv) => inv.payments ?? []).sort((a, b) => b.paid_at.localeCompare(a.paid_at))[0] : undefined;
+  const plainKes = (minor: number) => (minor / 100).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const partRows = blank ? [] : job.job_card_parts;
+  const rows = Array.from({ length: Math.max(10, partRows.length) });
+
+  return (
+    <div className="work-order-copy">
+      <div className="wo-header">
+        <div className="wo-brand">
+          <img src="/logo.png" alt="Oakland Motor Care Ltd" />
+          <h1>WORK ORDER</h1>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <span className="print-copy-badge">{COPY_LABELS[copyMode]}</span>
-          <div className="print-field" style={{ marginTop: 10 }}><span>Job card no.</span>{blank ? <div className="fill-line" style={{ width: 160 }} /> : <strong>{job.job_number}</strong>}</div>
-          {!blank && <div className="print-field"><span>Status</span><strong>{job.status.replaceAll('_', ' ')}</strong></div>}
+        <div className="wo-meta-box">
+          <div><span>Work Order No.</span><strong>{blank ? '' : job.job_number}</strong></div>
+          <div><span>Date</span><strong>{blank || !job.received_at ? '__ / __ / ____' : formatDate(job.received_at)}</strong></div>
         </div>
       </div>
 
-      <section className="print-section">
-        <h4>Customer details</h4>
-        <div className="print-grid">
-          {field('Full name', job.customers?.full_name)}
-          {field('Phone', job.customers?.phone)}
-          {field('Email', job.customers?.email)}
-          {field('Address', job.customers?.address)}
-        </div>
-      </section>
+      <div className="wo-row">
+        <section className="wo-section" style={{ flex: 2 }}>
+          <h5>1. VEHICLE DETAILS</h5>
+          <div className="wo-fields">
+            <div className="wo-field-row">
+              <span>Reg. No.: <strong>{blank ? '' : job.vehicles?.registration_number}</strong></span>
+              <span>Model / Make: <strong>{blank || !job.vehicles ? '' : `${job.vehicles.make} ${job.vehicles.model}`}</strong></span>
+            </div>
+            <div className="wo-field-row">
+              <span>Customer Name: <strong>{blank ? '' : job.customers?.full_name}</strong></span>
+              <span>Phone No.: <strong>{blank ? '' : job.customers?.phone}</strong></span>
+            </div>
+          </div>
+        </section>
+        <section className="wo-section" style={{ flex: 1 }}>
+          <h5>2. JOB TYPE</h5>
+          <p className="wo-lines">{blank ? '' : job.job_types.map((t) => JOB_TYPE_META.find((m) => m.key === t)?.label ?? t).join(', ')}</p>
+        </section>
+      </div>
 
-      <section className="print-section">
-        <h4>Vehicle details</h4>
-        <div className="print-grid">
-          {field('Registration no.', job.vehicles?.registration_number)}
-          {field('Make / Model', job.vehicles ? `${job.vehicles.make} ${job.vehicles.model}` : undefined)}
-          {field('Year', job.vehicles?.year ? String(job.vehicles.year) : undefined)}
-          {field('Mileage (KM)', blank ? undefined : job.mileage.toLocaleString())}
-          {field('VIN', job.vehicles?.vin)}
-          {field('Colour', job.vehicles?.colour)}
-        </div>
-      </section>
-
-      <section className="print-section">
-        <h4>Job information</h4>
-        <div className="print-grid">
-          {field('Job type', blank ? undefined : job.job_types.map((t) => t.replaceAll('_', ' ')).join(', '))}
-          {field('Priority', blank ? undefined : job.priority)}
-          {field('Date/time in', job.received_at ? formatDateTime(job.received_at) : undefined)}
-          {field('Promised date', job.promised_at ? formatDate(job.promised_at) : undefined)}
-          {field('Date/time out', job.released_at ? formatDateTime(job.released_at) : undefined)}
-        </div>
-      </section>
-
-      <section className="print-section">
-        <h4>Customer complaint / reason for visit</h4>
-        {blank ? <div className="fill-line" style={{ minHeight: 44 }} /> : <p>{job.complaint}</p>}
-        {!blank && job.requested_service && <p className="muted">Requested: {job.requested_service}</p>}
-      </section>
-
-      <section className="print-section">
-        <h4>Vehicle inspection checklist</h4>
-        <table className="print-table"><thead><tr><th>Category</th><th>Condition</th><th>Notes</th></tr></thead>
-          <tbody>{INSPECTION_CATEGORIES.map((category) => {
-            const existing = job.job_card_inspection_items.find((i) => i.category === category);
-            return <tr key={category}><td>{category.replaceAll('_', ' ')}</td><td>{blank ? '' : (existing?.condition ?? 'NOT CHECKED').replaceAll('_', ' ')}</td><td>{blank ? '' : (existing?.notes ?? '')}</td></tr>;
-          })}</tbody>
-        </table>
-      </section>
-
-      {!blank && (job.job_card_diagnosis ?? []).length > 0 && <section className="print-section">
-        <h4>Diagnosis</h4>
-        {job.job_card_diagnosis.map((d) => <p key={d.id}>{d.findings}{d.recommended_repairs ? ` — Recommended: ${d.recommended_repairs}` : ''}</p>)}
-      </section>}
-
-      {!blank && (job.job_card_work_items ?? []).length > 0 && <section className="print-section">
-        <h4>Work carried out</h4>
-        <table className="print-table"><thead><tr><th>Description</th>{workshop && <th>Assigned to</th>}<th>Status</th></tr></thead>
-          <tbody>{job.job_card_work_items.map((w) => <tr key={w.id}><td>{w.description}</td>{workshop && <td>{w.assigned_technician_id ?? 'Unassigned'}</td>}<td>{w.status.replaceAll('_', ' ')}</td></tr>)}</tbody>
-        </table>
-      </section>}
-
-      {!blank && ((job.job_card_labour ?? []).length > 0 || (job.job_card_parts ?? []).length > 0) && <section className="print-section">
-        <h4>Labour &amp; parts</h4>
-        <table className="print-table"><thead><tr><th>Description</th><th>Qty</th><th>Unit price</th><th>Total</th></tr></thead>
+      <section className="wo-section">
+        <h5>3. PARTS USED</h5>
+        <table className="wo-table">
+          <thead><tr><th>No.</th><th>Part / Description</th><th>Part Number</th><th>Qty</th><th>Unit Price (KES)</th><th className="wo-shaded">Total Price (KES)</th></tr></thead>
           <tbody>
-            {job.job_card_labour.map((l) => <tr key={l.id}><td>{l.description}</td><td>{l.quantity}</td><td>{formatKes(l.unit_price_minor)}</td><td>{formatKes(computeLineTotal(l.quantity, l.unit_price_minor, l.tax_rate))}</td></tr>)}
-            {job.job_card_parts.map((p) => <tr key={p.id}><td>{p.parts?.name ?? 'Part'}</td><td>{p.quantity}</td><td>{formatKes(p.unit_price_minor)}</td><td>{formatKes(computeLineTotal(p.quantity, p.unit_price_minor, 16))}</td></tr>)}
+            {rows.map((_, i) => {
+              const p = partRows[i];
+              const total = p ? computeLineTotal(p.quantity, p.unit_price_minor, 16) : 0;
+              return <tr key={i}>
+                <td>{i + 1}</td>
+                <td>{p?.parts?.name ?? ''}</td>
+                <td>{p?.parts?.sku ?? ''}</td>
+                <td>{p ? p.quantity : ''}</td>
+                <td>{p ? plainKes(p.unit_price_minor) : ''}</td>
+                <td className="wo-shaded">{p ? plainKes(total) : ''}</td>
+              </tr>;
+            })}
           </tbody>
+          <tfoot><tr><td colSpan={5}>TOTAL PARTS (KES)</td><td className="wo-shaded">{blank ? '' : plainKes(partsTotal)}</td></tr></tfoot>
         </table>
-        <div className="print-totals"><table><tbody>
-          <tr><td>Labour total</td><td>{formatKes(labourTotal)}</td></tr>
-          <tr><td>Parts total</td><td>{formatKes(partsTotal)}</td></tr>
-          <tr><td><strong>Grand total</strong></td><td><strong>{formatKes(labourTotal + partsTotal)}</strong></td></tr>
-        </tbody></table></div>
-      </section>}
-
-      {workshop && (job.invoices ?? []).length > 0 && <section className="print-section">
-        <h4>Office use only</h4>
-        {job.invoices.map((inv) => <p key={inv.id}>{inv.invoice_number} — {inv.status.replaceAll('_', ' ')} — Total {formatKes(inv.total_minor)}, Paid {formatKes(inv.amount_paid_minor)}, Balance {formatKes(inv.total_minor - inv.amount_paid_minor)}</p>)}
-      </section>}
-
-      <section className="print-section">
-        <h4>Sign-off</h4>
-        <div className="signature-grid">{SIGNOFF_ROLES.map((role) => {
-          const existing = job.job_card_signoffs.find((s) => s.role === role);
-          return <div className="signature-box" key={role}>{blank || !existing ? <div className="fill-line" style={{ minHeight: 30 }} /> : <div>{existing.name}<br />{formatDate(existing.signed_at)}</div>}<span>{role.replaceAll('_', ' ')}</span></div>;
-        })}</div>
       </section>
 
-      <div className="print-terms">{settings?.job_card_terms ?? ''}</div>
+      <section className="wo-section">
+        <h5>4. JOB DONE</h5>
+        <p className="wo-lines wo-lines-tall">{jobDone}</p>
+      </section>
+
+      <div className="wo-row">
+        <section className="wo-section" style={{ flex: 1 }}>
+          <h5>5. CHARGES</h5>
+          <div className="wo-charges">
+            <div><span>Labour (KES)</span><strong>{blank ? '' : plainKes(labourTotal)}</strong></div>
+            <div><span>Parts (KES)</span><strong>{blank ? '' : plainKes(partsTotal)}</strong></div>
+            <div><span>Other (KES)</span><strong>{blank ? '' : plainKes(job.other_charges_minor)}</strong></div>
+            <div className="wo-total"><span>TOTAL (KES)</span><strong>{blank ? '' : plainKes(labourTotal + partsTotal + job.other_charges_minor)}</strong></div>
+          </div>
+          <p className="wo-signature-line">Customer Signature: ________________________</p>
+        </section>
+        <section className="wo-section" style={{ flex: 1 }}>
+          <h5>6. COMPLETION</h5>
+          <p className="wo-signature-line">Technician: {technicianName ?? '________________________'}</p>
+          <p className="wo-signature-line">Signature: ________________________</p>
+          <div className="wo-checkbox-row">
+            <span>Payment:</span>
+            <label><input type="checkbox" readOnly checked={lastPayment?.method === 'CASH'} /> Cash</label>
+            <label><input type="checkbox" readOnly checked={lastPayment?.method === 'MPESA'} /> M-Pesa</label>
+            <label><input type="checkbox" readOnly checked={!!lastPayment && lastPayment.method !== 'CASH' && lastPayment.method !== 'MPESA'} /> Other ____</label>
+          </div>
+        </section>
+      </div>
     </div>
-  </div>;
+  );
 }
 
 // === SERVICES ===
