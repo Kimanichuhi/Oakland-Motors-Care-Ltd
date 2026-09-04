@@ -98,3 +98,25 @@ button { cursor:pointer; }
 .wod-cancel-btn { color:#a4493d; border-color:#f0d9d5; }
 .wod-cancel-btn:hover { background:#fff0ee; }
 .wod-cancelled-banner { display:flex; align-items:center; gap:10px; margin:22px 0; padding:14px 16px; background:#fff0ee; border:1px solid #f6d6d0; border-radius:10px; color:#a4493d; font-weight:700; font-size:13px; }
+
+/* Slightly larger type on big screens — most of the UI sets an explicit px size per
+   element rather than scaling off a root rem value, so the bump is applied directly
+   to the handful of shared classes that make up nearly all body/heading/table text.
+   Deliberately excludes the work-order print sheet (fixed to fit a physical page) and
+   the tiny uppercase eyebrow/status-pill labels (sized small by design, not by neglect). */
+@media (min-width:1440px) {
+  body { font-size:16px; }
+  .page-heading h1 { font-size:40px; }
+  .detail-header h2 { font-size:34px; }
+  .panel-heading h3,.feature-empty h3 { font-size:23px; }
+  .job-main strong,.table-row strong { font-size:13px; }
+  .job-main span,.table-row span { font-size:12px; }
+  .info-card strong { font-size:14px; }
+  .info-card span { font-size:12px; }
+  .modal-form input,.modal-form select,.modal-form textarea,.auth-card input,.combobox-new input,.combobox-new select,.inline-form input { font-size:14px; }
+  .combobox input { font-size:15px; }
+  .combobox-option { font-size:14px; }
+  .combobox-option strong { font-size:15px; }
+  .button { font-size:13px; }
+  .form-error { font-size:12px; }
+}

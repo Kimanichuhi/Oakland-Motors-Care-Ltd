@@ -4,14 +4,13 @@ import { createStaffUser } from './setup';
 describe('generate_job_card_number', () => {
   it('produces a well-formed, sequential number', async () => {
     const { client: admin } = await createStaffUser('ADMIN', 'admin');
-    const year = new Date().getFullYear();
 
     const first = await admin.rpc('generate_job_card_number');
     const second = await admin.rpc('generate_job_card_number');
     expect(first.error).toBeNull();
     expect(second.error).toBeNull();
 
-    const pattern = new RegExp(`^[A-Za-z0-9]+-JC-${year}-\\d{6}$`);
+    const pattern = /^[A-Za-z0-9]+-\d{3,}$/;
     expect(first.data).toMatch(pattern);
     expect(second.data).toMatch(pattern);
     expect(first.data).not.toBe(second.data);

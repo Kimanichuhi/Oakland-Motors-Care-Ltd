@@ -1,8 +1,9 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { toPng } from 'html-to-image';
 import { supabase } from '@/lib/supabase';
-import { formatKes, formatDate, formatDateTime, computeLineTotal } from '@/lib/formatting';
+import { formatKes, formatDate, formatDateTime, computeLineTotal, downloadCSV } from '@/lib/formatting';
 import { statusStyles, JOB_TRANSITIONS, PAYMENT_METHODS, SALES_PAYMENT_METHODS, SALES_PAYMENT_STATUSES, CUSTOMER_SALE_TYPES, PART_CATEGORIES, JOB_TYPE_META } from '@/lib/constants';
 import { loadUserPermissions, hasPermission, clearPermissionCache, type UserPermission } from '@/lib/permissions';
 import type { Customer, Vehicle, Service, Part, Supplier, JobCard, JobCardLabour, JobCardPart, JobCardStatusHistory, JobCardInspectionItem, JobCardWorkItem, JobCardDiagnosis, JobCardQualityCheck, JobCardSignoff, Invoice, InvoiceItem, Payment, Quotation, QuotationItem, PurchaseOrder, PurchaseOrderItem, StockMovement, Sale, SaleItem, Employee, Notification, AuditLog, BusinessSettings, Role, Permission, Profile } from '@/lib/types';
@@ -280,7 +281,7 @@ function SectionRouter(props: SectionProps) {
     case 'dashboard': return <DashboardSection onNewJob={() => p.setShowJobForm(true)} onNewCustomer={() => p.setShowCustomerForm(true)} />;
     case 'customers': return p.selectedCustomerId ? <CustomerDetail id={p.selectedCustomerId} onBack={() => p.setSelectedCustomerId(null)} onNewVehicle={() => p.setShowVehicleForm(true)} onNewJob={() => p.setShowJobForm(true)} /> : <CustomersSection query={p.query} onNew={() => p.setShowCustomerForm(true)} onSelect={(id) => p.setSelectedCustomerId(id)} />;
     case 'vehicles': return p.selectedVehicleId ? <VehicleDetail id={p.selectedVehicleId} onBack={() => p.setSelectedVehicleId(null)} onNewJob={() => p.setShowJobForm(true)} /> : <VehiclesSection query={p.query} onSelect={(id) => p.setSelectedVehicleId(id)} />;
-    case 'jobcards': return p.selectedJobId ? <JobDetail id={p.selectedJobId} onBack={() => p.setSelectedJobId(null)} can={p.can} onNotice={p.onNotice} onRefresh={p.onRefresh} onNewInvoice={() => p.setShowInvoiceForm(true)} /> : <JobsSection query={p.query} onNew={() => p.setShowJobForm(true)} onSelect={(id) => p.setSelectedJobId(id)} />;
+    case 'jobcards': return p.selectedJobId ? <JobDetail id={p.selectedJobId} onBack={() => p.setSelectedJobId(null)} can={p.can} onNotice={p.onNotice} onRefresh={p.onRefresh} onNewInvoice={() => p.setShowInvoiceForm(true)} /> : <JobsSection query={p.query} onNew={() => p.setShowJobForm(true)} onSelect={(id) => p.setSelectedJobId(id)} onNotice={p.onNotice} />;
     case 'services': return <ServicesSection onNew={() => p.setShowServiceForm(true)} />;
     case 'technicians': return <TechniciansSection onNew={() => p.setShowTechnicianForm(true)} can={p.can} />;
     case 'sales': return p.selectedSaleId ? <SaleDetail id={p.selectedSaleId} onBack={() => p.setSelectedSaleId(null)} can={p.can} onNotice={p.onNotice} onRefresh={p.onRefresh} /> : <SalesSection query={p.query} onNew={() => p.setShowSaleForm(true)} onSelect={(id) => p.setSelectedSaleId(id)} can={p.can} />;
@@ -644,12 +645,59 @@ const JOB_STATUS_BUCKETS: { key: string; label: string; statuses: string[] }[] =
   { key: 'CANCELLED', label: 'Cancelled', statuses: ['CANCELLED'] },
 ];
 
-function JobsSection({ query, onNew, onSelect }: { query: string; onNew: () => void; onSelect: (id: string) => void }) {
+type JobExportRow = JobCard & {
+  vehicles: { registration_number: string; make: string | null; model: string | null } | null;
+  customers: { full_name: string; phone: string } | null;
+  job_card_labour: { quantity: number; unit_price_minor: number; tax_rate: number }[];
+  job_card_parts: { quantity: number; unit_price_minor: number }[];
+  job_card_signoffs: { role: string; name: string }[];
+  invoices: { total_minor: number; amount_paid_minor: number }[];
+};
+
+function JobsSection({ query, onNew, onSelect, onNotice }: { query: string; onNew: () => void; onSelect: (id: string) => void; onNotice: (m: string) => void }) {
   const [jobs, setJobs] = useState<(JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [bucketFilter, setBucketFilter] = useState<string | null>(null);
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
+  const [exporting, setExporting] = useState(false);
+
+  async function exportWorkOrdersCSV() {
+    setExporting(true);
+    const { data, error } = await supabase
+      .from('job_cards')
+      .select('job_number,created_at,status,job_types,other_charges_minor,vehicles(registration_number,make,model),customers(full_name,phone),job_card_labour(quantity,unit_price_minor,tax_rate),job_card_parts(quantity,unit_price_minor),job_card_signoffs(role,name),invoices(total_minor,amount_paid_minor)')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false });
+    setExporting(false);
+    if (error) { onNotice('Unable to export work orders. Please try again.'); return; }
+    const rows = (data ?? []) as unknown as JobExportRow[];
+    if (rows.length === 0) { onNotice('There are no work orders to export.'); return; }
+
+    downloadCSV(`Oakland_Work_Orders_${new Date().toISOString().slice(0, 10)}.csv`, rows.map((j) => {
+      const labourTotal = (j.job_card_labour ?? []).reduce((s, l) => s + computeLineTotal(l.quantity, l.unit_price_minor, l.tax_rate), 0);
+      const partsTotal = (j.job_card_parts ?? []).reduce((s, p) => s + computeLineTotal(p.quantity, p.unit_price_minor, 16), 0);
+      const total = labourTotal + partsTotal + (j.other_charges_minor ?? 0);
+      const amountPaid = j.invoices?.[0]?.amount_paid_minor ?? 0;
+      return {
+        'Job Number': j.job_number,
+        'Date': formatDate(j.created_at),
+        'Status': j.status,
+        'Reg No': j.vehicles?.registration_number ?? '',
+        'Make/Model': [j.vehicles?.make, j.vehicles?.model].filter(Boolean).join(' '),
+        'Customer': j.customers?.full_name ?? '',
+        'Phone': j.customers?.phone ?? '',
+        'Job Type': (j.job_types ?? []).join('; '),
+        'Technician': j.job_card_signoffs?.find((s) => s.role === 'TECHNICIAN')?.name ?? '',
+        'Labour (KES)': (labourTotal / 100).toFixed(2),
+        'Parts (KES)': (partsTotal / 100).toFixed(2),
+        'Other (KES)': ((j.other_charges_minor ?? 0) / 100).toFixed(2),
+        'Total (KES)': (total / 100).toFixed(2),
+        'Amount Paid (KES)': (amountPaid / 100).toFixed(2),
+        'Balance Due (KES)': (Math.max(0, total - amountPaid) / 100).toFixed(2),
+      };
+    }));
+  }
   useEffect(() => {
     supabase.from('job_cards').select('status').is('deleted_at', null).then(({ data }) => {
       const counts: Record<string, number> = {};
@@ -668,6 +716,9 @@ function JobsSection({ query, onNew, onSelect }: { query: string; onNew: () => v
     })();
   }, [query, statusFilter, bucketFilter]);
   return <SectionPanel eyebrow="Workshop execution" title="Work Orders" onNew={onNew} newLabel="New work order">
+    <div className="action-buttons" style={{ marginBottom: 16 }}>
+      <button className="button secondary small" disabled={exporting} onClick={() => void exportWorkOrdersCSV()}><Download size={15} /> {exporting ? 'Exporting…' : 'Export CSV'}</button>
+    </div>
     <div className="metric-grid" style={{ marginBottom: 20 }}>{JOB_STATUS_BUCKETS.map((b) => {
       const count = b.statuses.reduce((s, st) => s + (statusCounts[st] ?? 0), 0);
       return <button key={b.key} className="metric-card" style={{ textAlign: 'left', cursor: 'pointer', outline: bucketFilter === b.key ? '2px solid var(--gold)' : 'none' }} onClick={() => { setBucketFilter(bucketFilter === b.key ? null : b.key); setStatusFilter('ALL'); }}>
@@ -884,7 +935,7 @@ function JobDetail({ id, onBack, can, onNotice, onRefresh, onNewInvoice }: { id:
         {can('job.view') && <button className="button secondary small" onClick={() => setShowPrint(true)}><Printer size={16} /> Print work order</button>}
       </div>
     </section>
-    {showPrint && <JobCardPrintView job={job} labourTotal={labourTotal} partsTotal={partsTotal} onClose={() => setShowPrint(false)} />}
+    {showPrint && <JobCardPrintView job={job} labourTotal={labourTotal} partsTotal={partsTotal} onClose={() => setShowPrint(false)} onNotice={onNotice} />}
   </>;
 }
 
@@ -1066,8 +1117,38 @@ function JobCardPartAdder({ jobCardId, can, onAdded }: { jobCardId: string; can:
 
 
 // === JOB CARD PRINT / PDF VIEW — matches the physical duplicate Work Order pad ===
-function JobCardPrintView({ job, labourTotal, partsTotal, onClose }: { job: JobDetailData; labourTotal: number; partsTotal: number; onClose: () => void }) {
+function JobCardPrintView({ job, labourTotal, partsTotal, onClose, onNotice }: { job: JobDetailData; labourTotal: number; partsTotal: number; onClose: () => void; onNotice: (m: string) => void }) {
   const [blank, setBlank] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  async function exportImage() {
+    const node = document.getElementById('print-area');
+    if (!node) return;
+    setExporting(true);
+    try {
+      await document.fonts?.ready;
+      const images = Array.from(node.querySelectorAll('img'));
+      await Promise.all(images.map((img) => (img.complete ? Promise.resolve() : new Promise((resolve) => { img.onload = resolve; img.onerror = resolve; }))));
+
+      // Explicit width/height (rather than letting html-to-image infer them) works around a
+      // known issue where combining pixelRatio with an inferred size clips the output to
+      // roughly the top half of a tall node.
+      const dataUrl = await toPng(node, {
+        pixelRatio: 2,
+        width: node.scrollWidth,
+        height: node.scrollHeight,
+        backgroundColor: '#ffffff',
+        cacheBust: true,
+      });
+      const link = document.createElement('a');
+      link.download = `${job.job_number}-work-order.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch {
+      onNotice('Unable to export the work order as an image. Please try again.');
+    }
+    setExporting(false);
+  }
 
   return <div className="print-overlay">
     <div className="print-toolbar no-print">
@@ -1077,6 +1158,7 @@ function JobCardPrintView({ job, labourTotal, partsTotal, onClose }: { job: JobD
       </div>
       <div className="action-buttons">
         <button className="button primary small" onClick={() => window.print()}><Printer size={15} /> Print / Save as PDF</button>
+        <button className="button secondary small" disabled={exporting} onClick={() => void exportImage()}><Download size={15} /> {exporting ? 'Exporting…' : 'Export as image'}</button>
         <button className="close-button" onClick={onClose}><X size={16} /></button>
       </div>
     </div>
@@ -1090,7 +1172,12 @@ function JobCardPrintView({ job, labourTotal, partsTotal, onClose }: { job: JobD
 function WorkOrderCopy({ job, labourTotal, partsTotal, blank }: { job: JobDetailData; labourTotal: number; partsTotal: number; blank: boolean }) {
   const technicianName = job.job_card_signoffs.find((s) => s.role === 'TECHNICIAN')?.name;
   const jobDone = job.job_card_work_items?.filter((w) => w.status === 'COMPLETED').map((w) => w.description).join('; ') || job.recommended_work || '';
-  const lastPayment = !blank ? job.invoices.flatMap((inv) => inv.payments ?? []).sort((a, b) => b.paid_at.localeCompare(a.paid_at))[0] : undefined;
+  const payments = !blank ? job.invoices.flatMap((inv) => inv.payments ?? []).sort((a, b) => b.paid_at.localeCompare(a.paid_at)) : [];
+  const lastPayment = payments[0];
+  const mpesaPayment = payments.find((p) => p.method === 'MPESA');
+  const amountPaid = blank ? 0 : (job.invoices?.[0]?.amount_paid_minor ?? 0);
+  const totalCharges = labourTotal + partsTotal + job.other_charges_minor;
+  const balanceDue = Math.max(0, totalCharges - amountPaid);
   const plainKes = (minor: number) => (minor / 100).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const partRows = blank ? [] : job.job_card_parts;
   const rows = Array.from({ length: Math.max(10, partRows.length) });
@@ -1162,7 +1249,9 @@ function WorkOrderCopy({ job, labourTotal, partsTotal, blank }: { job: JobDetail
             <div><span>Labour (KES)</span><strong>{blank ? '' : plainKes(labourTotal)}</strong></div>
             <div><span>Parts (KES)</span><strong>{blank ? '' : plainKes(partsTotal)}</strong></div>
             <div><span>Other (KES)</span><strong>{blank ? '' : plainKes(job.other_charges_minor)}</strong></div>
-            <div className="wo-total"><span>TOTAL (KES)</span><strong>{blank ? '' : plainKes(labourTotal + partsTotal + job.other_charges_minor)}</strong></div>
+            <div className="wo-total"><span>TOTAL (KES)</span><strong>{blank ? '' : plainKes(totalCharges)}</strong></div>
+            <div><span>Amount Paid (KES)</span><strong>{blank ? '' : plainKes(amountPaid)}</strong></div>
+            <div><span>Balance Due (KES)</span><strong>{blank ? '' : plainKes(balanceDue)}</strong></div>
           </div>
           <p className="wo-signature-line">Customer Signature: ________________________</p>
         </section>
@@ -1176,6 +1265,7 @@ function WorkOrderCopy({ job, labourTotal, partsTotal, blank }: { job: JobDetail
             <label><input type="checkbox" readOnly checked={lastPayment?.method === 'MPESA'} /> M-Pesa</label>
             <label><input type="checkbox" readOnly checked={!!lastPayment && lastPayment.method !== 'CASH' && lastPayment.method !== 'MPESA'} /> Other ____</label>
           </div>
+          <p className="wo-signature-line">M-Pesa Code: {blank ? '________________________' : (mpesaPayment?.reference || '________________________')}</p>
         </section>
       </div>
     </div>
@@ -1602,6 +1692,21 @@ function SettingsSection({ onNotice }: { onNotice: (m: string) => void }) {
 // === USERS & ROLES ===
 type StaffRow = Profile & { user_roles: { role_id: string; roles: { name: string; label: string } | null }[] };
 
+// supabase-js treats any non-2xx Edge Function response as an "invoke error" and leaves
+// `data` null, discarding the JSON error body the function actually sent — so the real
+// reason (e.g. "Not authorized to manage users") gets swallowed unless we read it back off
+// the FunctionsHttpError's `.context` Response ourselves.
+async function readFunctionsError(error: unknown, fallback: string): Promise<string> {
+  const context = (error as { context?: unknown } | null)?.context;
+  if (context && typeof (context as Response).json === 'function') {
+    try {
+      const body = await (context as Response).json();
+      if (body && typeof body.error === 'string' && body.error) return body.error;
+    } catch { /* response wasn't JSON, or already consumed */ }
+  }
+  return fallback;
+}
+
 function UsersSection({ onNotice }: { onNotice: (m: string) => void }) {
   const [roles, setRoles] = useState<Role[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
@@ -1642,7 +1747,7 @@ function UsersSection({ onNotice }: { onNotice: (m: string) => void }) {
 
   async function callAdmin(body: Record<string, unknown>) {
     const { data, error } = await supabase.functions.invoke('admin-users', { body });
-    if (error) { onNotice('That action could not be completed. Please try again.'); return false; }
+    if (error) { onNotice(await readFunctionsError(error, 'That action could not be completed. Please try again.')); return false; }
     if (data?.error) { onNotice(data.error); return false; }
     return true;
   }
@@ -1701,7 +1806,8 @@ function CreateAccountForm({ roles, onClose, onSaved }: { roles: Role[]; onClose
       body: { action: 'create', email: email.trim().toLowerCase(), fullName, phone: phone || null, roleId, password },
     });
     setBusy(false);
-    if (invokeError || data?.error) { setError(data?.error ?? 'Unable to create account. Please try again.'); return; }
+    if (invokeError) { setError(await readFunctionsError(invokeError, 'Unable to create account. Please try again.')); return; }
+    if (data?.error) { setError(data.error); return; }
     onSaved(`Account created for ${email}. Share the password with them directly.`);
   }
 
@@ -1730,7 +1836,8 @@ function InviteEmployeeForm({ roles, onClose, onSaved }: { roles: Role[]; onClos
       body: { action: 'invite', email: email.trim().toLowerCase(), fullName, phone: phone || null, roleId },
     });
     setBusy(false);
-    if (invokeError || data?.error) { setError(data?.error ?? 'Unable to send invitation. Please try again.'); return; }
+    if (invokeError) { setError(await readFunctionsError(invokeError, 'Unable to send invitation. Please try again.')); return; }
+    if (data?.error) { setError(data.error); return; }
     onSaved(`Invitation sent to ${email}.`);
   }
 
