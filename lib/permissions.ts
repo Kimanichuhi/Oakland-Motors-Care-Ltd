@@ -23,8 +23,8 @@ export async function loadUserPermissions(): Promise<UserPermission> {
 
   const roles = (userRoles as unknown as { role_id: string; roles: { name: string; label: string } }[]) ?? [];
   const primaryRole = roles[0]?.roles;
-  const roleName = primaryRole?.name ?? 'SERVICE_ADVISOR';
-  const roleLabel = primaryRole?.label ?? 'Service Advisor';
+  const roleName = primaryRole?.name ?? 'MANAGER';
+  const roleLabel = primaryRole?.label ?? 'Garage Manager';
 
   const { data: rolePerms } = await supabase
     .from('role_permissions')

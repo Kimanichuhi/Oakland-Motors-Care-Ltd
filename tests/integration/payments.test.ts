@@ -6,9 +6,9 @@ describe('record_payment', () => {
     const admin = adminClient();
     const { customer } = await seedCustomerAndVehicle(admin);
     const invoice = await seedInvoice(admin, customer.id, 5_000_000); // KES 50,000.00
-    const { client: accountant } = await createStaffUser('ACCOUNTANT', 'accountant');
+    const { client: staff } = await createStaffUser('ADMIN', 'admin-payments');
 
-    const first = await accountant.rpc('record_payment', {
+    const first = await staff.rpc('record_payment', {
       p_invoice_id: invoice.id,
       p_amount_minor: 2_000_000,
       p_method: 'CASH',
@@ -21,7 +21,7 @@ describe('record_payment', () => {
     expect(afterFirst?.amount_paid_minor).toBe(2_000_000);
     expect(afterFirst?.status).toBe('PART_PAID');
 
-    const second = await accountant.rpc('record_payment', {
+    const second = await staff.rpc('record_payment', {
       p_invoice_id: invoice.id,
       p_amount_minor: 3_000_000,
       p_method: 'CASH',
@@ -39,9 +39,9 @@ describe('record_payment', () => {
     const admin = adminClient();
     const { customer } = await seedCustomerAndVehicle(admin);
     const invoice = await seedInvoice(admin, customer.id, 1_000_000);
-    const { client: accountant } = await createStaffUser('ACCOUNTANT', 'accountant');
+    const { client: staff } = await createStaffUser('ADMIN', 'admin-payments');
 
-    const { error } = await accountant.rpc('record_payment', {
+    const { error } = await staff.rpc('record_payment', {
       p_invoice_id: invoice.id,
       p_amount_minor: 1_500_000,
       p_method: 'CASH',
@@ -58,7 +58,7 @@ describe('record_payment', () => {
     const admin = adminClient();
     const { customer } = await seedCustomerAndVehicle(admin);
     const invoice = await seedInvoice(admin, customer.id, 3_000_000);
-    const { client: accountant } = await createStaffUser('ACCOUNTANT', 'accountant');
+    const { client: staff } = await createStaffUser('ADMIN', 'admin-payments');
     const idempotencyKey = `mpesa-test-${Date.now()}`;
 
     const params = {
@@ -68,8 +68,8 @@ describe('record_payment', () => {
       p_reference: 'MPESA-RCPT-1',
       p_idempotency_key: idempotencyKey,
     };
-    const first = await accountant.rpc('record_payment', params);
-    const second = await accountant.rpc('record_payment', params);
+    const first = await staff.rpc('record_payment', params);
+    const second = await staff.rpc('record_payment', params);
     expect(first.error).toBeNull();
     expect(second.error).toBeNull();
     expect(second.data).toBe(first.data); // same payment id returned both times

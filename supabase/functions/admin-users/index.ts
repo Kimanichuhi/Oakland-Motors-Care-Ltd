@@ -83,6 +83,46 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ success: true, userId });
     }
 
+    if (action === "create") {
+      const email = String(body.email ?? "").trim().toLowerCase();
+      const fullName = String(body.fullName ?? "").trim();
+      const phone = body.phone ? String(body.phone) : null;
+      const roleId = String(body.roleId ?? "");
+      const password = String(body.password ?? "");
+      if (!email || !fullName || !roleId || !password) {
+        return jsonResponse({ error: "email, fullName, password and roleId are required" }, 400);
+      }
+      if (password.length < 6) {
+        return jsonResponse({ error: "Password must be at least 6 characters" }, 400);
+      }
+
+      const { data: created, error: createError } = await admin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { full_name: fullName },
+      });
+      if (createError || !created?.user) {
+        return jsonResponse({ error: createError?.message ?? "Unable to create account" }, 400);
+      }
+
+      const userId = created.user.id;
+      await admin.from("profiles").upsert(
+        { id: userId, full_name: fullName, phone, status: "ACTIVE", invited_by: caller.id, invited_at: new Date().toISOString() },
+        { onConflict: "id" },
+      );
+      await admin.from("user_roles").upsert({ user_id: userId, role_id: roleId }, { onConflict: "user_id,role_id" });
+      await admin.from("audit_logs").insert({
+        actor_id: caller.id,
+        action: "USER_CREATED",
+        entity: "profiles",
+        entity_id: userId,
+        after_state: { email, full_name: fullName, role_id: roleId },
+      });
+
+      return jsonResponse({ success: true, userId });
+    }
+
     if (action === "suspend" || action === "reactivate" || action === "disable") {
       const userId = String(body.userId ?? "");
       if (!userId) return jsonResponse({ error: "userId is required" }, 400);

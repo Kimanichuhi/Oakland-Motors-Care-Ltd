@@ -13,11 +13,8 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: '#f6f8fa',
     theme_color: '#10263f',
     icons: [
-      { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' },
-      { src: '/icon-192', sizes: '192x192', type: 'image/png', purpose: 'any' },
-      { src: '/icon-192', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
-      { src: '/icon-512', sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: '/icon-512', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      { src: '/favicon.png', sizes: '1254x1254', type: 'image/png', purpose: 'any' },
+      { src: '/favicon.png', sizes: '1254x1254', type: 'image/png', purpose: 'maskable' },
     ],
   };
 }

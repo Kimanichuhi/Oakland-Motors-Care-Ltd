@@ -8,7 +8,7 @@ export function adminClient(): SupabaseClient {
   return createClient(url, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } });
 }
 
-export type RoleName = 'ADMIN' | 'MANAGER' | 'SERVICE_ADVISOR' | 'TECHNICIAN' | 'STOREKEEPER' | 'ACCOUNTANT' | 'OWNER_READONLY';
+export type RoleName = 'ADMIN' | 'MANAGER';
 
 /** Creates a fresh, ACTIVE, single-role staff user and returns a signed-in client for them. */
 export async function createStaffUser(roleName: RoleName, label: string): Promise<{ userId: string; client: SupabaseClient }> {

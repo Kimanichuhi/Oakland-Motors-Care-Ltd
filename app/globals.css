@@ -39,10 +39,7 @@ button { cursor:pointer; }
 @media (max-width:700px) { .kpi-row { grid-template-columns:repeat(2, 1fr); } }
 
 /* Job card "Work Order" print view — mirrors the physical duplicate pad. */
-.work-order-sheet { max-width:1120px; }
-.work-order-page { position:relative; display:flex; gap:0; align-items:stretch; }
-.work-order-copy { flex:1; min-width:0; border:1.5px solid var(--navy); border-radius:10px; padding:14px; font-size:10px; color:#1c2733; }
-.wo-cut-divider { width:26px; flex-shrink:0; border-left:1px dashed #9aa7b4; display:flex; align-items:center; justify-content:center; color:#9aa7b4; }
+.work-order-copy { border:1.5px solid var(--navy); border-radius:10px; padding:14px; font-size:10px; color:#1c2733; }
 .wo-header { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:10px; }
 .wo-brand { display:flex; align-items:center; gap:10px; }
 .wo-brand img { height:38px; }
@@ -70,7 +67,34 @@ button { cursor:pointer; }
 .wo-signature-line { padding:8px; margin:0; font-size:9.5px; }
 .wo-checkbox-row { display:flex; align-items:center; gap:10px; font-size:9.5px; flex-wrap:wrap; padding:0 8px 8px; }
 .wo-checkbox-row label { display:flex; align-items:center; gap:4px; }
-@media print {
-  @page work-order { size:A4 landscape; margin:10mm; }
-  .work-order-sheet { page:work-order; }
-}
+
+/* Work order detail screen — onboarding-style progress stepper + smart search polish. */
+.combobox input { width:100%; border:1.5px solid #dfe5ea; background:white; border-radius:9px; padding:13px 14px 13px 40px; outline:0; color:var(--ink); font-size:14px; }
+.combobox input:focus { border-color:var(--navy); box-shadow:0 0 0 3px #10263f14; }
+.combobox-search-icon { position:absolute; left:13px; top:50%; transform:translateY(-50%); color:#8997a5; pointer-events:none; }
+.combobox-new input, .combobox-new select { border:1px solid #dfe5ea; background:white; border-radius:7px; padding:10px 11px; outline:0; color:var(--ink); font-size:13px; }
+.combobox-new input:focus, .combobox-new select:focus { border-color:#7d9ab0; box-shadow:0 0 0 3px #7d9ab01c; }
+.combobox-option strong { font-size:14px; }
+.inline-form { display:flex; gap:10px; margin-top:12px; }
+.inline-form input { border:1px solid #dfe5ea; background:white; border-radius:7px; padding:11px 12px; outline:0; color:var(--ink); font-size:13px; }
+.inline-form input:focus { border-color:#7d9ab0; box-shadow:0 0 0 3px #7d9ab01c; }
+.inline-form input[type=number] { width:130px; flex:0 0 auto; }
+.inline-form input:not([type=number]) { flex:1; }
+
+.wod-progress { display:flex; align-items:center; margin:22px 0 6px; }
+.wod-step-wrap { display:flex; align-items:center; flex:1; }
+.wod-step-wrap:last-child { flex:0 0 auto; }
+.wod-step { display:flex; align-items:center; gap:8px; white-space:nowrap; }
+.wod-step-dot { display:flex; color:#c3cbd2; }
+.wod-step.done .wod-step-dot { color:#2f9e6e; }
+.wod-step.current .wod-step-dot { color:var(--navy); }
+.wod-step-label { font-size:13px; font-weight:700; color:#9aa7b4; }
+.wod-step.done .wod-step-label { color:#2f9e6e; }
+.wod-step.current .wod-step-label { color:var(--navy); font-size:14px; }
+.wod-step-line { flex:1; height:2px; background:#e3e8ec; margin:0 10px; border-radius:2px; }
+.wod-step-line.done { background:#2f9e6e; }
+.wod-progress-actions { display:flex; align-items:center; gap:14px; margin:16px 0 4px; flex-wrap:wrap; }
+.wod-progress-actions .button.primary { padding:13px 20px; font-size:13px; }
+.wod-cancel-btn { color:#a4493d; border-color:#f0d9d5; }
+.wod-cancel-btn:hover { background:#fff0ee; }
+.wod-cancelled-banner { display:flex; align-items:center; gap:10px; margin:22px 0; padding:14px 16px; background:#fff0ee; border:1px solid #f6d6d0; border-radius:10px; color:#a4493d; font-weight:700; font-size:13px; }

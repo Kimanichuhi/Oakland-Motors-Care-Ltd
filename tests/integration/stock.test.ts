@@ -7,9 +7,9 @@ describe('issue_stock', () => {
     const { customer, vehicle } = await seedCustomerAndVehicle(admin);
     const job = await seedJobCard(admin, customer.id, vehicle.id);
     const part = await seedPart(admin, 10);
-    const { client: storekeeper } = await createStaffUser('STOREKEEPER', 'storekeeper');
+    const { client: staff } = await createStaffUser('ADMIN', 'admin');
 
-    const { error } = await storekeeper.rpc('issue_stock', {
+    const { error } = await staff.rpc('issue_stock', {
       p_part_id: part.id,
       p_quantity: 4,
       p_reference: job.job_number,
@@ -26,9 +26,9 @@ describe('issue_stock', () => {
     const { customer, vehicle } = await seedCustomerAndVehicle(admin);
     const job = await seedJobCard(admin, customer.id, vehicle.id);
     const part = await seedPart(admin, 10);
-    const { client: storekeeper } = await createStaffUser('STOREKEEPER', 'storekeeper');
+    const { client: staff } = await createStaffUser('ADMIN', 'admin');
 
-    const { error } = await storekeeper.rpc('issue_stock', {
+    const { error } = await staff.rpc('issue_stock', {
       p_part_id: part.id,
       p_quantity: 11,
       p_reference: job.job_number,
@@ -45,9 +45,9 @@ describe('receive_stock', () => {
   it('increments stock on a successful receipt', async () => {
     const admin = adminClient();
     const part = await seedPart(admin, 5);
-    const { client: storekeeper } = await createStaffUser('STOREKEEPER', 'storekeeper');
+    const { client: staff } = await createStaffUser('ADMIN', 'admin');
 
-    const { error } = await storekeeper.rpc('receive_stock', {
+    const { error } = await staff.rpc('receive_stock', {
       p_part_id: part.id,
       p_quantity: 20,
       p_unit_cost_minor: 45000,

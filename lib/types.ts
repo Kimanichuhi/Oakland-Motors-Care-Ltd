@@ -16,8 +16,8 @@ export type Vehicle = {
   id: string;
   customer_id: string;
   registration_number: string;
-  make: string;
-  model: string;
+  make: string | null;
+  model: string | null;
   year: number | null;
   vin: string | null;
   mileage: number;

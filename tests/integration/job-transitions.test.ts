@@ -6,27 +6,16 @@ describe('transition_job_status', () => {
     const admin = adminClient();
     const { customer, vehicle } = await seedCustomerAndVehicle(admin);
     const job = await seedJobCard(admin, customer.id, vehicle.id);
-    const { client: manager } = await createStaffUser('MANAGER', 'manager');
+    const { client: staff } = await createStaffUser('ADMIN', 'admin-transitions');
 
-    const path = ['RECEIVED', 'DIAGNOSIS', 'AWAITING_APPROVAL', 'APPROVED', 'IN_PROGRESS', 'QUALITY_CHECK'];
+    const path = ['OPEN', 'IN_PROGRESS', 'COMPLETED'];
     for (const status of path) {
-      const { error } = await manager.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: status, p_reason: null });
-      expect(error, `transition to ${status} should succeed`).toBeNull();
-    }
-
-    // READY_FOR_COLLECTION is gated behind a passed quality check.
-    const gated = await manager.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: 'READY_FOR_COLLECTION', p_reason: null });
-    expect(gated.error).not.toBeNull();
-
-    await admin.from('job_card_quality_checks').insert({ job_card_id: job.id, checklist: {}, result: 'PASSED' });
-
-    for (const status of ['READY_FOR_COLLECTION', 'COLLECTED', 'CLOSED']) {
-      const { error } = await manager.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: status, p_reason: null });
+      const { error } = await staff.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: status, p_reason: null });
       expect(error, `transition to ${status} should succeed`).toBeNull();
     }
 
     const { data: finalJob } = await admin.from('job_cards').select('status,received_at,released_at').eq('id', job.id).single();
-    expect(finalJob?.status).toBe('CLOSED');
+    expect(finalJob?.status).toBe('COMPLETED');
     expect(finalJob?.received_at).not.toBeNull();
     expect(finalJob?.released_at).not.toBeNull();
 
@@ -35,16 +24,16 @@ describe('transition_job_status', () => {
       .select('from_status,to_status')
       .eq('job_card_id', job.id)
       .order('changed_at', { ascending: true });
-    expect(history?.map((h) => h.to_status)).toEqual([...path, 'READY_FOR_COLLECTION', 'COLLECTED', 'CLOSED']);
+    expect(history?.map((h) => h.to_status)).toEqual(path);
   });
 
   it('rejects an illegal skip-ahead transition and leaves status unchanged', async () => {
     const admin = adminClient();
     const { customer, vehicle } = await seedCustomerAndVehicle(admin);
     const job = await seedJobCard(admin, customer.id, vehicle.id);
-    const { client: manager } = await createStaffUser('MANAGER', 'manager');
+    const { client: staff } = await createStaffUser('ADMIN', 'admin-transitions');
 
-    const { error } = await manager.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: 'COLLECTED', p_reason: null });
+    const { error } = await staff.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: 'COMPLETED', p_reason: null });
     expect(error).not.toBeNull();
 
     const { data: unchanged } = await admin.from('job_cards').select('status').eq('id', job.id).single();
@@ -55,29 +44,33 @@ describe('transition_job_status', () => {
     const admin = adminClient();
     const { customer, vehicle } = await seedCustomerAndVehicle(admin);
     const job = await seedJobCard(admin, customer.id, vehicle.id);
-    const { client: manager } = await createStaffUser('MANAGER', 'manager');
+    const { client: staff } = await createStaffUser('ADMIN', 'admin-transitions');
 
-    await manager.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: 'CANCELLED', p_reason: 'test' });
-    const { error } = await manager.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: 'IN_PROGRESS', p_reason: null });
+    await staff.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: 'CANCELLED', p_reason: 'test' });
+    const { error } = await staff.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: 'IN_PROGRESS', p_reason: null });
     expect(error).not.toBeNull();
   });
 
-  it('rejects READY_FOR_COLLECTION without a passed quality check, and leaves status unchanged', async () => {
+  it('issues pending parts on transition into IN_PROGRESS', async () => {
     const admin = adminClient();
     const { customer, vehicle } = await seedCustomerAndVehicle(admin);
     const job = await seedJobCard(admin, customer.id, vehicle.id);
-    const { client: manager } = await createStaffUser('MANAGER', 'manager');
+    const { client: staff } = await createStaffUser('ADMIN', 'admin-transitions');
 
-    for (const status of ['RECEIVED', 'DIAGNOSIS', 'AWAITING_APPROVAL', 'APPROVED', 'IN_PROGRESS', 'QUALITY_CHECK']) {
-      await manager.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: status, p_reason: null });
-    }
-    // A FAILED result should not satisfy the gate.
-    await admin.from('job_card_quality_checks').insert({ job_card_id: job.id, checklist: {}, result: 'FAILED' });
+    const { data: part } = await admin.from('parts').insert({ sku: `TEST-${job.id.slice(0, 8)}`, name: 'Test part', category: 'Other', selling_price_minor: 1000, cost_price_minor: 500, quantity_on_hand: 10, reorder_level: 1 }).select().single();
 
-    const { error } = await manager.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: 'READY_FOR_COLLECTION', p_reason: null });
-    expect(error).not.toBeNull();
+    await staff.rpc('add_job_card_part', { p_job_card_id: job.id, p_part_id: part.id, p_quantity: 3 });
+    const { data: beforeIssue } = await admin.from('parts').select('quantity_on_hand').eq('id', part.id).single();
+    expect(beforeIssue?.quantity_on_hand).toBe(10);
 
-    const { data: unchanged } = await admin.from('job_cards').select('status').eq('id', job.id).single();
-    expect(unchanged?.status).toBe('QUALITY_CHECK');
+    await staff.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: 'OPEN', p_reason: null });
+    const { error } = await staff.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: 'IN_PROGRESS', p_reason: null });
+    expect(error).toBeNull();
+
+    const { data: afterIssue } = await admin.from('parts').select('quantity_on_hand').eq('id', part.id).single();
+    expect(afterIssue?.quantity_on_hand).toBe(7);
+
+    const { data: line } = await admin.from('job_card_parts').select('issued_at').eq('job_card_id', job.id).eq('part_id', part.id).single();
+    expect(line?.issued_at).not.toBeNull();
   });
 });
