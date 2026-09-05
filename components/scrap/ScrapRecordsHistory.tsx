@@ -52,7 +52,7 @@ export default function ScrapRecordsHistory({ can, onNotice, onRefresh, refreshK
         <Search size={15} />
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by date..." />
       </div>
-      <div className="form-row" style={{ marginBottom: 18, gridTemplateColumns: 'repeat(3, minmax(0,1fr))' }}>
+      <div className="form-row modal-form" style={{ marginBottom: 18, gridTemplateColumns: 'repeat(3, minmax(0,1fr))' }}>
         <label>From<input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></label>
         <label>To<input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></label>
         <label>Sort<select value={sortDir} onChange={(e) => setSortDir(e.target.value as 'asc' | 'desc')}><option value="desc">Newest first</option><option value="asc">Oldest first</option></select></label>

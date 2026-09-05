@@ -274,6 +274,8 @@ export type StockMovement = {
   unit_cost_minor: number;
   reason: string | null;
   reference: string | null;
+  reference_id: string | null;
+  user_id: string | null;
   created_at: string;
 };
 
@@ -294,6 +296,9 @@ export type Sale = {
   total_minor: number;
   amount_paid_minor: number;
   balance_minor: number;
+  payment_reference: string | null;
+  payment_reference_at: string | null;
+  job_card_id: string | null;
   void_reason: string | null;
   voided_by: string | null;
   voided_at: string | null;

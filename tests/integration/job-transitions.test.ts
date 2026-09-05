@@ -72,5 +72,29 @@ describe('transition_job_status', () => {
 
     const { data: line } = await admin.from('job_card_parts').select('issued_at').eq('job_card_id', job.id).eq('part_id', part.id).single();
     expect(line?.issued_at).not.toBeNull();
+
+    const { data: sale } = await admin.from('sales').select('*, sale_items(*)').eq('job_card_id', job.id).single();
+    expect(sale?.customer_type).toBe('JOB_CARD');
+    expect(sale?.payment_method).toBe('JOB_CARD');
+    expect(sale?.payment_status).toBe('PENDING');
+    expect(sale?.total_minor).toBe(3000);
+    expect(sale?.sale_items).toHaveLength(1);
+    expect(sale?.sale_items[0].part_id).toBe(part.id);
+    expect(sale?.sale_items[0].quantity).toBe(3);
+  });
+
+  it('creates exactly one sale for a batch of parts issued in a single transition', async () => {
+    const admin = adminClient();
+    const { customer, vehicle } = await seedCustomerAndVehicle(admin);
+    const job = await seedJobCard(admin, customer.id, vehicle.id);
+    const { client: staff } = await createStaffUser('ADMIN', 'admin-transitions-2');
+
+    const { data: part } = await admin.from('parts').insert({ sku: `TEST2-${job.id.slice(0, 8)}`, name: 'Test part 2', category: 'Other', selling_price_minor: 500, cost_price_minor: 200, quantity_on_hand: 10, reorder_level: 1 }).select().single();
+    await staff.rpc('add_job_card_part', { p_job_card_id: job.id, p_part_id: part.id, p_quantity: 2 });
+    await staff.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: 'OPEN', p_reason: null });
+    await staff.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: 'IN_PROGRESS', p_reason: null });
+
+    const { count: firstCount } = await admin.from('sales').select('id', { count: 'exact', head: true }).eq('job_card_id', job.id);
+    expect(firstCount).toBe(1);
   });
 });

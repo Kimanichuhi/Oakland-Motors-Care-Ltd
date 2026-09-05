@@ -112,7 +112,7 @@ export default function ScrapItemsManager({ items, onClose, onChanged, onNotice,
         </div>
 
         {canManage && (
-          <form onSubmit={addItem} className="form-row" style={{ marginTop: 18, gridTemplateColumns: '1fr 120px auto' }}>
+          <form onSubmit={addItem} className="form-row modal-form" style={{ marginTop: 18, gridTemplateColumns: '1fr 120px auto', alignItems: 'center' }}>
             <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New scrap type name" required />
             <input type="number" min={0} step="0.01" value={newRate} onChange={(e) => setNewRate(e.target.value)} placeholder="Rate/kg (optional)" />
             <button className="button primary small" type="submit" disabled={adding}><Plus size={15} /> Add</button>

@@ -104,15 +104,15 @@ export default function ScrapSection({ can, onNotice }: { can: (p: string) => bo
       )}
 
       {canEnter && !needsOpeningBalance && (
-        <section className="panel" style={{ marginBottom: 20 }}>
+        <section className="panel scrap-workdate-panel" style={{ marginBottom: 20 }}>
           <div className="panel-heading"><div><p className="eyebrow">Data entry</p><h3>Working date</h3></div></div>
-          <div className="form-row" style={{ gridTemplateColumns: '1fr 1fr auto', alignItems: 'end' }}>
+          <div className="scrap-workdate-row">
             <label>Working date<input type="date" value={workingDate} max={localDateStr()} onChange={(e) => { setWorkingDate(e.target.value); setChangeInDays(0); }} /></label>
             <label>Change in days<input type="number" min={0} value={changeInDays} onChange={(e) => setChangeInDays(Math.max(0, parseInt(e.target.value) || 0))} /></label>
-            <div className="info-card" style={{ margin: 0 }}><ArrowRight size={16} /><div><span>Entries will use</span><strong>{resolvedDate}</strong></div></div>
+            <div className="scrap-resolved-date"><ArrowRight size={16} /><div><span>Entries will use</span><strong>{resolvedDate}</strong></div></div>
           </div>
-          <p className="muted" style={{ marginTop: 6 }}>Leave Change in Days at 0 to keep entering on the same date. Set it to advance the working date once Joseph moves to a new day.</p>
-          <div className="action-buttons" style={{ marginTop: 14 }}>
+          <p className="muted" style={{ marginTop: 8 }}>Leave Change in Days at 0 to keep entering on the same date. Set it to advance the working date once Joseph moves to a new day.</p>
+          <div className="action-buttons" style={{ marginTop: 16 }}>
             {can('scrap.record') && <button className="button primary" onClick={() => setShowPurchaseForm(true)}><Plus size={15} /> Add Purchase</button>}
             {can('scrap.record') && <button className="button secondary" onClick={() => setShowExpenseForm(true)}><Plus size={15} /> Add Expense</button>}
             {can('scrap.record') && <button className="button secondary" onClick={() => setShowCashForm(true)}><Banknote size={15} /> Add Cash</button>}

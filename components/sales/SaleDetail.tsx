@@ -5,16 +5,18 @@ import { formatKes, formatDateTime } from '@/lib/formatting';
 import { statusStyles } from '@/lib/constants';
 import { ShoppingCart, ChevronRight, User, Phone, CreditCard, CircleDollarSign, Ban } from 'lucide-react';
 
-type SaleWithItems = Sale & { sale_items: SaleItem[] };
+type SaleWithItems = Sale & { sale_items: SaleItem[]; job_cards: { job_number: string } | null };
 
 export default function SaleDetail({ id, onBack, onRefresh, onNotice, can }: { id: string; onBack: () => void; onRefresh?: () => void; onNotice?: (m: string) => void; can: (p: string) => boolean }) {
   const [sale, setSale] = useState<SaleWithItems | null>(null);
   const [loading, setLoading] = useState(true);
   const [voiding, setVoiding] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase.from('sales').select('*, sale_items(*)').eq('id', id).maybeSingle();
+    const { data, error } = await supabase.from('sales').select('*, sale_items(*), job_cards(job_number)').eq('id', id).maybeSingle();
+    setLoadError(error ? error.message : '');
     setSale(data as SaleWithItems | null);
     setLoading(false);
   }, [id]);
@@ -35,20 +37,20 @@ export default function SaleDetail({ id, onBack, onRefresh, onNotice, can }: { i
   }
 
   if (loading) return <div className="empty"><strong>Loading…</strong></div>;
-  if (!sale) return <div className="empty"><strong>Sale not found</strong></div>;
+  if (!sale) return <div className="empty"><strong>{loadError ? `Unable to load sale: ${loadError}` : 'Sale not found'}</strong></div>;
 
   return (
     <div>
       <div className="back-bar"><button onClick={onBack}><ChevronRight size={16} className="back-icon" /> Sales</button></div>
       <div className="detail-header">
         <div className="detail-avatar"><ShoppingCart size={22} /></div>
-        <div className="flex-1"><h2>{sale.sale_number}</h2><p className="muted">{sale.customer_name || sale.customer_type.replaceAll('_', ' ')}{sale.customer_phone ? ` · ${sale.customer_phone}` : ''} · {formatDateTime(sale.sale_date)}</p></div>
+        <div className="flex-1"><h2>{sale.sale_number}</h2><p className="muted">{sale.customer_name || sale.customer_type.replaceAll('_', ' ')}{sale.customer_phone ? ` · ${sale.customer_phone}` : ''}{sale.job_cards?.job_number ? ` · Work Order ${sale.job_cards.job_number}` : ''} · {formatDateTime(sale.sale_date)}</p></div>
         <span className={`status ${statusStyles[sale.status] ?? ''}`}>{sale.status.replaceAll('_', ' ')}</span>
       </div>
 
       <div className="detail-info-grid">
         <div className="info-card"><User size={16} /> <div><span>Customer type</span><strong>{sale.customer_type.replaceAll('_', ' ')}</strong></div></div>
-        <div className="info-card"><CreditCard size={16} /> <div><span>Payment</span><strong>{sale.payment_method.replaceAll('_', ' ')} · {sale.payment_status}</strong></div></div>
+        <div className="info-card"><CreditCard size={16} /> <div><span>Payment</span><strong>{sale.payment_method.replaceAll('_', ' ')} · {sale.payment_status}</strong>{sale.payment_reference && <span>{sale.payment_reference}{sale.payment_reference_at ? ` · ${formatDateTime(sale.payment_reference_at)}` : ''}</span>}</div></div>
         <div className="info-card"><CircleDollarSign size={16} /> <div><span>Salesperson</span><strong>{sale.salesperson_name ?? '—'}</strong></div></div>
         <div className="info-card"><CircleDollarSign size={16} /> <div><span>Balance due</span><strong>{formatKes(sale.balance_minor)}</strong></div></div>
       </div>
@@ -77,7 +79,8 @@ export default function SaleDetail({ id, onBack, onRefresh, onNotice, can }: { i
 
       <div className="action-buttons" style={{ marginTop: 16 }}>
         <button className="button secondary" onClick={onBack}>Back</button>
-        {can('sales.void') && sale.status === 'COMPLETED' && <button className="button secondary" disabled={voiding} onClick={() => void voidSale()}><Ban size={15} /> {voiding ? 'Voiding…' : 'Void sale'}</button>}
+        {can('sales.void') && sale.status === 'COMPLETED' && !sale.job_card_id && <button className="button secondary" disabled={voiding} onClick={() => void voidSale()}><Ban size={15} /> {voiding ? 'Voiding…' : 'Void sale'}</button>}
+        {sale.job_card_id && sale.status === 'COMPLETED' && <p className="muted">Generated from a job card — reverse it from the work order instead of voiding here.</p>}
       </div>
     </div>
   );

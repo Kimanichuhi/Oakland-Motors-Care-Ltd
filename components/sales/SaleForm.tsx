@@ -20,8 +20,9 @@ export default function SaleForm({ onClose, onSaved, can }: { onClose: () => voi
   const [saleDate, setSaleDate] = useState(nowForInput());
   const [paymentMethod, setPaymentMethod] = useState<(typeof SALES_PAYMENT_METHODS)[number]>('CASH');
   const [paymentStatus, setPaymentStatus] = useState<(typeof SALES_PAYMENT_STATUSES)[number]>('PAID');
-  const [discountDisplay, setDiscountDisplay] = useState('0');
   const [partialPaidDisplay, setPartialPaidDisplay] = useState('0');
+  const [mpesaCode, setMpesaCode] = useState('');
+  const [mpesaSentAt, setMpesaSentAt] = useState(nowForInput());
 
   const [parts, setParts] = useState<Part[]>([]);
   const [partsLoading, setPartsLoading] = useState(true);
@@ -46,10 +47,9 @@ export default function SaleForm({ onClose, onSaved, can }: { onClose: () => voi
   }, [q, parts]);
 
   const subtotalMinor = items.reduce((sum, i) => sum + i.quantity * i.unitPriceMinor, 0);
-  const discountMinor = Math.max(0, displayToMinor(parseFloat(discountDisplay) || 0));
-  const totalMinor = Math.max(0, subtotalMinor - discountMinor);
+  const totalMinor = subtotalMinor;
+  const isMpesa = paymentMethod === 'MPESA';
   const amountPaidMinor = paymentStatus === 'PAID' ? totalMinor : paymentStatus === 'PENDING' ? 0 : Math.min(totalMinor, Math.max(0, displayToMinor(parseFloat(partialPaidDisplay) || 0)));
-  const balanceMinor = Math.max(0, totalMinor - amountPaidMinor);
   const hasZeroPricedItem = items.some((i) => i.unitPriceMinor === 0);
   const hasOverStockItem = items.some((i) => i.quantity > i.quantityOnHand);
 
@@ -85,6 +85,8 @@ export default function SaleForm({ onClose, onSaved, can }: { onClose: () => voi
     if (items.length === 0) { setFormError('Add at least one item to the sale.'); return; }
     if (hasOverStockItem) { setFormError('One or more items exceed available stock.'); return; }
     if (paymentStatus === 'PARTIAL' && amountPaidMinor <= 0) { setFormError('Enter an amount paid for a partial payment.'); return; }
+    if (isMpesa && !mpesaCode.trim()) { setFormError('Enter the M-Pesa transaction code.'); return; }
+    if (isMpesa && !mpesaSentAt) { setFormError('Enter the time the M-Pesa payment was sent.'); return; }
 
     setBusy(true);
     try {
@@ -95,9 +97,11 @@ export default function SaleForm({ onClose, onSaved, can }: { onClose: () => voi
         p_payment_method: paymentMethod,
         p_payment_status: paymentStatus,
         p_sale_date: new Date(saleDate).toISOString(),
-        p_discount_minor: discountMinor,
+        p_discount_minor: 0,
         p_amount_paid_minor: amountPaidMinor,
         p_items: items.map((i) => ({ part_id: i.partId, quantity: i.quantity, unit_price_minor: i.unitPriceMinor })),
+        p_payment_reference: isMpesa ? mpesaCode.trim() : null,
+        p_payment_reference_at: isMpesa ? new Date(mpesaSentAt).toISOString() : null,
       };
       const { data, error } = await supabase.rpc('complete_sale', payload);
       if (error) throw error;
@@ -154,18 +158,17 @@ export default function SaleForm({ onClose, onSaved, can }: { onClose: () => voi
           {hasZeroPricedItem && <div className="form-error"><AlertTriangle size={14} /> Some items have no selling price set{canOverridePrice ? ' — edit the price above or set it on the part first.' : '; set a price on the part before selling it.'}</div>}
 
           <div className="form-row">
-            <label>Discount (KES)<input type="number" min={0} step="0.01" value={discountDisplay} onChange={(e) => setDiscountDisplay(e.target.value)} /></label>
             <label>Payment method<select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as typeof paymentMethod)}>{SALES_PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m.replaceAll('_', ' ')}</option>)}</select></label>
-          </div>
-          <div className="form-row">
             <label>Payment status<select value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value as typeof paymentStatus)}>{SALES_PAYMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}</select></label>
-            {paymentStatus === 'PARTIAL' && <label>Amount paid (KES)<input type="number" min={0} step="0.01" value={partialPaidDisplay} onChange={(e) => setPartialPaidDisplay(e.target.value)} /></label>}
           </div>
+          {isMpesa && <div className="form-row">
+            <label>M-Pesa transaction code<input value={mpesaCode} onChange={(e) => setMpesaCode(e.target.value.toUpperCase())} placeholder="e.g. QGH7XXXXXX" required /></label>
+            <label>Time money was sent<input type="datetime-local" value={mpesaSentAt} max={nowForInput()} onChange={(e) => setMpesaSentAt(e.target.value)} required /></label>
+          </div>}
+          {paymentStatus === 'PARTIAL' && <label>Amount paid (KES)<input type="number" min={0} step="0.01" value={partialPaidDisplay} onChange={(e) => setPartialPaidDisplay(e.target.value)} /></label>}
 
-          <div className="detail-info-grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))' }}>
-            <div className="info-card"><div><span>Subtotal</span><strong>{formatKes(subtotalMinor)}</strong></div></div>
+          <div className="detail-info-grid" style={{ gridTemplateColumns: '1fr' }}>
             <div className="info-card"><div><span>Total due</span><strong>{formatKes(totalMinor)}</strong></div></div>
-            <div className="info-card"><div><span>Balance</span><strong>{formatKes(balanceMinor)}</strong></div></div>
           </div>
 
           {formError && <div className="form-error">{formError}</div>}

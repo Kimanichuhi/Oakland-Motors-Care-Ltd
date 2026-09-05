@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { toPng } from 'html-to-image';
 import { supabase } from '@/lib/supabase';
-import { formatKes, formatDate, formatDateTime, computeLineTotal, downloadCSV } from '@/lib/formatting';
+import { formatKes, formatDate, formatDateTime, computeLineTotal, downloadCSV, formatKg } from '@/lib/formatting';
 import { statusStyles, JOB_TRANSITIONS, PAYMENT_METHODS, SALES_PAYMENT_METHODS, SALES_PAYMENT_STATUSES, CUSTOMER_SALE_TYPES, PART_CATEGORIES, JOB_TYPE_META } from '@/lib/constants';
 import { loadUserPermissions, hasPermission, clearPermissionCache, type UserPermission } from '@/lib/permissions';
 import type { Customer, Vehicle, Service, Part, Supplier, JobCard, JobCardLabour, JobCardPart, JobCardStatusHistory, JobCardInspectionItem, JobCardWorkItem, JobCardDiagnosis, JobCardQualityCheck, JobCardSignoff, Invoice, InvoiceItem, Payment, Quotation, QuotationItem, PurchaseOrder, PurchaseOrderItem, StockMovement, Sale, SaleItem, Employee, Notification, AuditLog, BusinessSettings, Role, Permission, Profile } from '@/lib/types';
@@ -71,6 +71,7 @@ export default function Home() {
   const [userPerms, setUserPerms] = useState<UserPermission>({ permissions: [], role: '', roleLabel: '', fullName: '' });
   const [query, setQuery] = useState('');
   const [notice, setNotice] = useState('');
+  const [unreadCount, setUnreadCount] = useState(0);
   const [online, setOnline] = useState(true);
   const [showMobileNav, setShowMobileNav] = useState(false);
   const [showCustomerForm, setShowCustomerForm] = useState(false);
@@ -125,6 +126,20 @@ export default function Home() {
 
   function refresh() { setRefreshKey((k) => k + 1); }
 
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(''), 3000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  useEffect(() => {
+    if (!session) { setUnreadCount(0); return; }
+    (async () => {
+      const { count } = await supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', session.user.id).is('read_at', null);
+      setUnreadCount(count ?? 0);
+    })();
+  }, [session, section, refreshKey]);
+
   async function signOut() {
     await supabase.auth.signOut();
     clearPermissionCache();
@@ -167,7 +182,7 @@ export default function Home() {
         <div className="topbar-search"><Search size={18} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search customers, plates, jobs, invoices..." /><kbd>⌘K</kbd></div>
         <div className="topbar-actions">
           <div className={`connection ${online ? '' : 'offline'}`}><span className={online ? 'online-dot' : 'offline-dot'} /> {online ? 'Online' : 'Offline'}</div>
-          <button className="icon-button" onClick={() => setSection('notifications')}><Bell size={19} /></button>
+          <button className="icon-button" onClick={() => setSection('notifications')}><Bell size={19} />{unreadCount > 0 && <i />}</button>
           <div className="top-avatar">{(userPerms.fullName || 'A').slice(0, 1).toUpperCase()}</div>
           <button className="mobile-menu" onClick={() => setShowMobileNav(!showMobileNav)}><Menu size={20} /></button>
         </div>
@@ -176,6 +191,7 @@ export default function Home() {
         {notice && <div className="notice"><CheckCircle2 size={17} /> {notice}<button onClick={() => setNotice('')}><X size={15} /></button></div>}
         <SectionRouter
           section={section}
+          setSection={setSection}
           query={query}
           can={can}
           userPerms={userPerms}
@@ -243,12 +259,16 @@ export default function Home() {
     {showPaymentForm && <PaymentForm onClose={() => setShowPaymentForm(false)} onSaved={(m) => { setShowPaymentForm(false); setNotice(m); refresh(); }} />}
     {showSaleForm && <SaleForm onClose={() => setShowSaleForm(false)} onSaved={(m) => { setShowSaleForm(false); setNotice(m); refresh(); }} can={can} />}
     {showStockReceiveForm && <StockReceiveForm onClose={() => setShowStockReceiveForm(false)} onSaved={(m) => { setShowStockReceiveForm(false); setNotice(m); refresh(); }} />}
-    {showStockAdjustForm && <StockAdjustForm onClose={() => setShowStockAdjustForm(false)} onSaved={(m) => { setShowStockAdjustForm(false); setNotice(m); refresh(); }} />}
+    {showStockAdjustForm && <StockAdjustForm onClose={() => setShowStockAdjustForm(false)} onSaved={(m) => { setShowStockAdjustForm(false); setNotice(m); refresh(); }}
+      onGoToReceive={() => { setShowStockAdjustForm(false); setShowStockReceiveForm(true); }}
+      onGoToSales={() => { setShowStockAdjustForm(false); setSection('sales'); setShowSaleForm(true); }}
+      onGoToWorkOrders={() => { setShowStockAdjustForm(false); setSection('jobcards'); }}
+    />}
   </main>;
 }
 
 type SectionProps = {
-  section: SectionId; query: string; can: (p: string) => boolean; userPerms: UserPermission;
+  section: SectionId; setSection: (s: SectionId) => void; query: string; can: (p: string) => boolean; userPerms: UserPermission;
   onNotice: (m: string) => void; onRefresh: () => void;
   selectedJobId: string | null; setSelectedJobId: (id: string | null) => void;
   selectedVehicleId: string | null; setSelectedVehicleId: (id: string | null) => void;
@@ -278,26 +298,30 @@ type SectionProps = {
 function SectionRouter(props: SectionProps) {
   const p = props;
   switch (p.section) {
-    case 'dashboard': return <DashboardSection onNewJob={() => p.setShowJobForm(true)} onNewCustomer={() => p.setShowCustomerForm(true)} />;
-    case 'customers': return p.selectedCustomerId ? <CustomerDetail id={p.selectedCustomerId} onBack={() => p.setSelectedCustomerId(null)} onNewVehicle={() => p.setShowVehicleForm(true)} onNewJob={() => p.setShowJobForm(true)} /> : <CustomersSection query={p.query} onNew={() => p.setShowCustomerForm(true)} onSelect={(id) => p.setSelectedCustomerId(id)} />;
-    case 'vehicles': return p.selectedVehicleId ? <VehicleDetail id={p.selectedVehicleId} onBack={() => p.setSelectedVehicleId(null)} onNewJob={() => p.setShowJobForm(true)} /> : <VehiclesSection query={p.query} onSelect={(id) => p.setSelectedVehicleId(id)} />;
-    case 'jobcards': return p.selectedJobId ? <JobDetail id={p.selectedJobId} onBack={() => p.setSelectedJobId(null)} can={p.can} onNotice={p.onNotice} onRefresh={p.onRefresh} onNewInvoice={() => p.setShowInvoiceForm(true)} /> : <JobsSection query={p.query} onNew={() => p.setShowJobForm(true)} onSelect={(id) => p.setSelectedJobId(id)} onNotice={p.onNotice} />;
-    case 'services': return <ServicesSection onNew={() => p.setShowServiceForm(true)} />;
+    case 'dashboard': return <DashboardSection onNewJob={() => p.setShowJobForm(true)} onNewCustomer={() => p.setShowCustomerForm(true)} onNewSale={() => p.setShowSaleForm(true)} onReceiveStock={() => p.setShowStockReceiveForm(true)} can={p.can} userPerms={p.userPerms} />;
+    case 'customers': return p.selectedCustomerId ? <CustomerDetail id={p.selectedCustomerId} onBack={() => p.setSelectedCustomerId(null)} onNewVehicle={() => p.setShowVehicleForm(true)} onNewJob={() => p.setShowJobForm(true)} can={p.can} /> : <CustomersSection query={p.query} onNew={() => p.setShowCustomerForm(true)} onSelect={(id) => p.setSelectedCustomerId(id)} can={p.can} />;
+    case 'vehicles': return p.selectedVehicleId ? <VehicleDetail id={p.selectedVehicleId} onBack={() => p.setSelectedVehicleId(null)} onNewJob={() => p.setShowJobForm(true)} can={p.can} /> : <VehiclesSection query={p.query} onSelect={(id) => p.setSelectedVehicleId(id)} />;
+    case 'jobcards': return p.selectedJobId ? <JobDetail id={p.selectedJobId} onBack={() => p.setSelectedJobId(null)} can={p.can} onNotice={p.onNotice} onRefresh={p.onRefresh} onNewInvoice={() => p.setShowInvoiceForm(true)} /> : <JobsSection query={p.query} onNew={() => p.setShowJobForm(true)} onSelect={(id) => p.setSelectedJobId(id)} onNotice={p.onNotice} can={p.can} />;
+    case 'services': return <ServicesSection onNew={() => p.setShowServiceForm(true)} can={p.can} />;
     case 'technicians': return <TechniciansSection onNew={() => p.setShowTechnicianForm(true)} can={p.can} />;
     case 'sales': return p.selectedSaleId ? <SaleDetail id={p.selectedSaleId} onBack={() => p.setSelectedSaleId(null)} can={p.can} onNotice={p.onNotice} onRefresh={p.onRefresh} /> : <SalesSection query={p.query} onNew={() => p.setShowSaleForm(true)} onSelect={(id) => p.setSelectedSaleId(id)} can={p.can} />;
-    case 'parts': return p.selectedPartId ? <PartDetail id={p.selectedPartId} onBack={() => p.setSelectedPartId(null)} /> : <PartsSection onNew={() => p.setShowPartForm(true)} onReceive={() => p.setShowStockReceiveForm(true)} onAdjust={() => p.setShowStockAdjustForm(true)} onSelect={(id) => p.setSelectedPartId(id)} can={p.can} />;
+    case 'parts': return p.selectedPartId ? <PartDetail id={p.selectedPartId} onBack={() => p.setSelectedPartId(null)} can={p.can} onNotice={p.onNotice}
+      onNavigateToSale={(saleId) => { p.setSelectedSaleId(saleId); p.setSection('sales'); }}
+      onNavigateToJob={(jobId) => { p.setSelectedJobId(jobId); p.setSection('jobcards'); }}
+      onNavigateToPO={(poId) => { p.setSelectedPOId(poId); p.setSection('procurement'); }}
+    /> : <PartsSection onNew={() => p.setShowPartForm(true)} onReceive={() => p.setShowStockReceiveForm(true)} onAdjust={() => p.setShowStockAdjustForm(true)} onSelect={(id) => p.setSelectedPartId(id)} can={p.can} />;
     case 'stockmovements': return <StockMovementsSection />;
     case 'lowstock': return <LowStockSection />;
-    case 'suppliers': return p.selectedSupplierId ? <SupplierDetail id={p.selectedSupplierId} onBack={() => p.setSelectedSupplierId(null)} onNewPO={() => p.setShowPOForm(true)} /> : <SuppliersSection query={p.query} onNew={() => p.setShowSupplierForm(true)} onSelect={(id) => p.setSelectedSupplierId(id)} />;
-    case 'procurement': return p.selectedPOId ? <PODetail id={p.selectedPOId} onBack={() => p.setSelectedPOId(null)} can={p.can} onNotice={p.onNotice} onRefresh={p.onRefresh} /> : <ProcurementSection onNew={() => p.setShowPOForm(true)} onSelect={(id) => p.setSelectedPOId(id)} />;
-    case 'quotations': return p.selectedQuotationId ? <QuotationDetail id={p.selectedQuotationId} onBack={() => p.setSelectedQuotationId(null)} can={p.can} onNotice={p.onNotice} onRefresh={p.onRefresh} /> : <QuotationsSection onNew={() => p.setShowQuotationForm(true)} onSelect={(id) => p.setSelectedQuotationId(id)} />;
-    case 'invoices': return p.selectedInvoiceId ? <InvoiceDetail id={p.selectedInvoiceId} onBack={() => p.setSelectedInvoiceId(null)} onPayment={() => p.setShowPaymentForm(true)} /> : <InvoicesSection query={p.query} onNew={() => p.setShowInvoiceForm(true)} onSelect={(id) => p.setSelectedInvoiceId(id)} />;
+    case 'suppliers': return p.selectedSupplierId ? <SupplierDetail id={p.selectedSupplierId} onBack={() => p.setSelectedSupplierId(null)} onNewPO={() => p.setShowPOForm(true)} can={p.can} /> : <SuppliersSection query={p.query} onNew={() => p.setShowSupplierForm(true)} onSelect={(id) => p.setSelectedSupplierId(id)} can={p.can} />;
+    case 'procurement': return p.selectedPOId ? <PODetail id={p.selectedPOId} onBack={() => p.setSelectedPOId(null)} can={p.can} onNotice={p.onNotice} onRefresh={p.onRefresh} /> : <ProcurementSection onNew={() => p.setShowPOForm(true)} onSelect={(id) => p.setSelectedPOId(id)} can={p.can} />;
+    case 'quotations': return p.selectedQuotationId ? <QuotationDetail id={p.selectedQuotationId} onBack={() => p.setSelectedQuotationId(null)} can={p.can} onNotice={p.onNotice} onRefresh={p.onRefresh} /> : <QuotationsSection onNew={() => p.setShowQuotationForm(true)} onSelect={(id) => p.setSelectedQuotationId(id)} can={p.can} />;
+    case 'invoices': return p.selectedInvoiceId ? <InvoiceDetail id={p.selectedInvoiceId} onBack={() => p.setSelectedInvoiceId(null)} onPayment={() => p.setShowPaymentForm(true)} can={p.can} /> : <InvoicesSection query={p.query} onNew={() => p.setShowInvoiceForm(true)} onSelect={(id) => p.setSelectedInvoiceId(id)} can={p.can} />;
     case 'scrap': return <ScrapSection can={p.can} onNotice={p.onNotice} />;
     case 'vehicleregister': return <VehicleRegisterSection can={p.can} onNotice={p.onNotice} />;
     case 'payments': return <PaymentsSection />;
     case 'receipts': return <ReceiptsSection />;
     case 'reports': return <ReportsSection />;
-    case 'notifications': return <NotificationsSection />;
+    case 'notifications': return <NotificationsSection onRefresh={p.onRefresh} />;
     case 'audit': return <AuditSection />;
     case 'settings': return <SettingsSection onNotice={p.onNotice} />;
     case 'users': return <UsersSection onNotice={p.onNotice} />;
@@ -417,8 +441,20 @@ function AccountInactiveScreen({ onSignOut }: { onSignOut: () => void }) {
 }
 
 // === DASHBOARD ===
-function DashboardSection({ onNewJob, onNewCustomer }: { onNewJob: () => void; onNewCustomer: () => void }) {
-  const [stats, setStats] = useState({ activeJobs: 0, completedToday: 0, readyJobs: 0, customers: 0, vehicles: 0, lowStock: 0, outOfStock: 0, outstandingInvoices: 0, todayRevenue: 0, pendingQuotes: 0, todaySales: 0, weekSales: 0, monthSales: 0 });
+function greetingForHour(hour: number) {
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+function roleDisplayName(userPerms: UserPermission) {
+  if (!userPerms.role) return 'there';
+  return userPerms.role.charAt(0) + userPerms.role.slice(1).toLowerCase();
+}
+
+function DashboardSection({ onNewJob, onNewCustomer, onNewSale, onReceiveStock, can, userPerms }: { onNewJob: () => void; onNewCustomer: () => void; onNewSale: () => void; onReceiveStock: () => void; can: (p: string) => boolean; userPerms: UserPermission }) {
+  const [stats, setStats] = useState({ activeJobs: 0, completedToday: 0, vehiclesPerWeek: 0, customers: 0, vehicles: 0, lowStock: 0, outOfStock: 0, outstandingInvoices: 0, overdueCount: 0, pendingQuotes: 0, todaySales: 0, weekSales: 0, monthSales: 0 });
+  const [worstOverdue, setWorstOverdue] = useState<{ customer: string; balance: number } | null>(null);
   const [recentJobs, setRecentJobs] = useState<(JobCard & { vehicles: { registration_number: string } | null, customers: { full_name: string } | null })[]>([]);
   const [recentSales, setRecentSales] = useState<Sale[]>([]);
   const [topItems, setTopItems] = useState<{ name: string; category: string | null; qty: number }[]>([]);
@@ -430,22 +466,28 @@ function DashboardSection({ onNewJob, onNewCustomer }: { onNewJob: () => void; o
       const today = new Date().toISOString().slice(0, 10);
       const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
       const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
-      const [jobs, customers, vehicles, parts, invoices, quotations] = await Promise.all([
+      const [jobs, customers, vehicles, parts, invoices, quotations, weekVehicleRows, overdueInvoices] = await Promise.all([
         supabase.from('job_cards').select('id,status,created_at,job_number,customer_id,vehicle_id,complaint').is('deleted_at', null).order('created_at', { ascending: false }).limit(50),
         supabase.from('customers').select('id', { count: 'exact', head: true }).is('deleted_at', null),
         supabase.from('vehicles').select('id', { count: 'exact', head: true }).is('deleted_at', null),
         supabase.from('parts').select('id,quantity_on_hand,reorder_level').eq('active', true),
         supabase.from('invoices').select('id,total_minor,amount_paid_minor,status,created_at').in('status', ['ISSUED','PART_PAID','OVERDUE']),
         supabase.from('quotations').select('id', { count: 'exact', head: true }).eq('status', 'PENDING_APPROVAL'),
+        supabase.from('job_cards').select('vehicle_id').gte('created_at', weekAgo.toISOString()).is('deleted_at', null),
+        supabase.from('invoices').select('total_minor,amount_paid_minor,customers(full_name)').eq('status', 'OVERDUE').order('created_at', { ascending: false }).limit(100),
       ]);
       const jobData = (jobs.data ?? []) as (JobCard & { vehicles: { registration_number: string } | null, customers: { full_name: string } | null })[];
       setRecentJobs(jobData.slice(0, 6));
       const active = jobData.filter((j) => !['COMPLETED','CANCELLED'].includes(j.status));
       const completedToday = jobData.filter((j) => j.status === 'COMPLETED' && j.created_at.slice(0, 10) === today);
-      const ready = jobData.filter((j) => j.status === 'COMPLETED');
       const lowStock = (parts.data ?? []).filter((p) => p.quantity_on_hand <= p.reorder_level);
       const outOfStock = (parts.data ?? []).filter((p) => p.quantity_on_hand === 0);
       const outstanding = (invoices.data ?? []).reduce((s, inv) => s + (inv.total_minor - inv.amount_paid_minor), 0);
+      const vehiclesPerWeek = new Set(((weekVehicleRows.data ?? []) as { vehicle_id: string }[]).map((r) => r.vehicle_id)).size;
+      const overdueRows = ((overdueInvoices.data ?? []) as unknown as { total_minor: number; amount_paid_minor: number; customers: { full_name: string } | null }[])
+        .map((inv) => ({ customer: inv.customers?.full_name ?? 'Customer', balance: inv.total_minor - inv.amount_paid_minor }))
+        .sort((a, b) => b.balance - a.balance);
+      setWorstOverdue(overdueRows[0] ?? null);
       const [todaySales, weekSales, monthSales, recentSaleRows, saleItemRows] = await Promise.all([
         supabase.from('sales').select('total_minor').gte('sale_date', `${today}T00:00:00`).neq('status', 'VOIDED'),
         supabase.from('sales').select('total_minor').gte('sale_date', weekAgo.toISOString()).neq('status', 'VOIDED'),
@@ -461,9 +503,9 @@ function DashboardSection({ onNewJob, onNewCustomer }: { onNewJob: () => void; o
       setRecentSales((recentSaleRows.data ?? []) as Sale[]);
       setTopItems(Array.from(itemTotals.values()).sort((a, b) => b.qty - a.qty).slice(0, 5));
       setStats({
-        activeJobs: active.length, completedToday: completedToday.length, readyJobs: ready.length,
+        activeJobs: active.length, completedToday: completedToday.length, vehiclesPerWeek,
         customers: customers.count ?? 0, vehicles: vehicles.count ?? 0, lowStock: lowStock.length,
-        outOfStock: outOfStock.length, outstandingInvoices: outstanding, todayRevenue: 0,
+        outOfStock: outOfStock.length, outstandingInvoices: outstanding, overdueCount: overdueRows.length,
         pendingQuotes: quotations.count ?? 0,
         todaySales: ((todaySales.data ?? []) as Sale[]).reduce((s, sale) => s + sale.total_minor, 0),
         weekSales: ((weekSales.data ?? []) as Sale[]).reduce((s, sale) => s + sale.total_minor, 0),
@@ -483,23 +525,28 @@ function DashboardSection({ onNewJob, onNewCustomer }: { onNewJob: () => void; o
     })();
   }, []);
 
+  const fabItems: { label: string; icon: React.ReactNode; onClick: () => void }[] = [];
+  if (can('job.create')) fabItems.push({ label: 'New work order', icon: <Wrench size={16} />, onClick: onNewJob });
+  if (can('sales.create')) fabItems.push({ label: 'New sale', icon: <Store size={16} />, onClick: onNewSale });
+  if (can('inventory.receive')) fabItems.push({ label: 'Receive stock', icon: <Boxes size={16} />, onClick: onReceiveStock });
+
   return <>
-    <div className="page-heading"><div><p className="eyebrow">{new Date().toLocaleDateString('en-KE', { weekday: 'long', day: 'numeric', month: 'long' })}</p><h1>Good morning, Oakland.</h1><p className="muted">Here&apos;s what&apos;s happening across the workshop today.</p></div><div className="heading-actions"><button className="button secondary" onClick={onNewCustomer}><Plus size={16} /> Add customer</button><button className="button primary" onClick={onNewJob}><Plus size={17} /> New work order</button></div></div>
+    <div className="page-heading"><div><p className="eyebrow">{new Date().toLocaleDateString('en-KE', { weekday: 'long', day: 'numeric', month: 'long' })}</p><h1>{greetingForHour(new Date().getHours())}, {roleDisplayName(userPerms)}.</h1><p className="muted">Here&apos;s what&apos;s happening across the workshop today.</p></div><div className="heading-actions">{can('customer.create') && <button className="button secondary" onClick={onNewCustomer}><Plus size={16} /> Add customer</button>}{can('job.create') && <button className="button primary" onClick={onNewJob}><Plus size={17} /> New work order</button>}</div></div>
     <div className="metric-grid">
       <Metric label="Active jobs" value={String(stats.activeJobs).padStart(2, '0')} trend="Across the workshop" icon={<Wrench />} tone="navy" />
-      <Metric label="Ready for pickup" value={String(stats.readyJobs).padStart(2, '0')} trend="Customer follow-up" icon={<CheckCircle2 />} tone="green" />
-      <Metric label="Low stock" value={String(stats.lowStock).padStart(2, '0')} trend="Parts to reorder" icon={<AlertTriangle />} tone="gold" />
+      <Metric label="Vehicles per week" value={String(stats.vehiclesPerWeek).padStart(2, '0')} trend="Distinct vehicles, last 7 days" icon={<CarFront />} tone="green" />
+      <Metric label="Sales for the month" value={formatKes(stats.monthSales)} trend="Since the 1st" icon={<Store />} tone="gold" />
       <Metric label="Outstanding" value={formatKes(stats.outstandingInvoices)} trend="Unpaid invoices" icon={<CircleDollarSign />} tone="blue" />
     </div>
     <div className="dashboard-grid">
       <section className="panel jobs-panel">
-        <div className="panel-heading"><div><p className="eyebrow">Workshop pulse</p><h3>Recent work orders</h3></div><button className="text-button" onClick={onNewJob}>New work order <Plus size={15} /></button></div>
+        <div className="panel-heading"><div><p className="eyebrow">Workshop pulse</p><h3>Recent work orders</h3></div>{can('job.create') && <button className="text-button" onClick={onNewJob}>New work order <Plus size={15} /></button>}</div>
         {recentJobs.length === 0 ? <Empty title="No active work orders" text="The workshop is currently clear." /> : <div className="job-list">{recentJobs.map((job) => <div className="job-row" key={job.id}><div className="job-icon"><Wrench size={17} /></div><div className="job-main"><strong>{job.job_number}</strong><span>{job.vehicles?.registration_number ?? 'Vehicle'} · {job.customers?.full_name ?? 'Customer'}</span></div><div className="job-complaint">{job.complaint}</div><span className={`status ${statusStyles[job.status] ?? 'bg-slate-100 text-slate-600'}`}>{job.status.replaceAll('_', ' ')}</span><ArrowUpRight className="row-arrow" size={17} /></div>)}</div>}
       </section>
       <section className="panel attention-panel">
         <div className="panel-heading"><div><p className="eyebrow">Needs attention</p><h3>Today&apos;s focus</h3></div><Sparkles size={18} className="gold-icon" /></div>
-        <div className="attention-item"><div className="attention-number">{stats.readyJobs}</div><div><strong>Vehicles ready for pickup</strong><span>Send a quick update to customers</span></div><ArrowUpRight size={16} /></div>
         <div className="attention-item"><div className={`attention-number ${stats.lowStock > 0 ? 'amber' : ''}`}>{stats.lowStock}</div><div><strong>Low-stock parts</strong><span>{stats.lowStock > 0 ? 'Reorder needed' : 'Inventory levels are healthy'}</span></div><ArrowUpRight size={16} /></div>
+        <div className="attention-item"><div className={`attention-number ${stats.overdueCount > 0 ? 'red' : ''}`}>{stats.overdueCount}</div><div><strong>Overdue bad debts</strong><span>{worstOverdue ? `Most critical: ${worstOverdue.customer} · ${formatKes(worstOverdue.balance)}` : 'No overdue balances'}</span></div><ArrowUpRight size={16} /></div>
         <div className="attention-item"><div className="attention-number">{stats.pendingQuotes}</div><div><strong>Pending quotations</strong><span>Awaiting customer approval</span></div><ArrowUpRight size={16} /></div>
       </section>
     </div>
@@ -514,7 +561,17 @@ function DashboardSection({ onNewJob, onNewCustomer }: { onNewJob: () => void; o
         {jobStatusData.length === 0 ? <Empty title="No job data" text="Jobs will appear here." /> : <div className="status-list">{jobStatusData.map((s) => <div key={s.status} className="status-row"><span className={`status ${statusStyles[s.status] ?? ''}`}>{s.status.replaceAll('_', ' ')}</span><strong>{s.count}</strong></div>)}</div>}
       </section>
     </div>
+    <DashboardFab items={fabItems} />
   </>;
+}
+
+function DashboardFab({ items }: { items: { label: string; icon: React.ReactNode; onClick: () => void }[] }) {
+  const [open, setOpen] = useState(false);
+  if (items.length === 0) return null;
+  return <div className="fab-container">
+    {open && <div className="fab-menu">{items.map((item) => <button key={item.label} className="fab-menu-item" onClick={() => { setOpen(false); item.onClick(); }}><span className="fab-menu-icon">{item.icon}</span>{item.label}</button>)}</div>}
+    <button className={`fab-button${open ? ' open' : ''}`} onClick={() => setOpen((v) => !v)} aria-label="Quick actions" aria-expanded={open}><Plus size={24} /></button>
+  </div>;
 }
 
 function Metric({ label, value, trend, icon, tone }: { label: string; value: string; trend: string; icon: React.ReactNode; tone: string }) {
@@ -522,7 +579,7 @@ function Metric({ label, value, trend, icon, tone }: { label: string; value: str
 }
 
 // === CUSTOMERS ===
-function CustomersSection({ query, onNew, onSelect }: { query: string; onNew: () => void; onSelect: (id: string) => void }) {
+function CustomersSection({ query, onNew, onSelect, can }: { query: string; onNew: () => void; onSelect: (id: string) => void; can: (p: string) => boolean }) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -533,12 +590,12 @@ function CustomersSection({ query, onNew, onSelect }: { query: string; onNew: ()
       setCustomers((data ?? []) as Customer[]); setLoading(false);
     })();
   }, [query]);
-  return <SectionPanel eyebrow="Directory" title="Customers" onNew={onNew} newLabel="Add customer">
+  return <SectionPanel eyebrow="Directory" title="Customers" onNew={can('customer.create') ? onNew : undefined} newLabel="Add customer">
     {loading ? <Loading /> : customers.length === 0 ? <Empty title="No customers found" text="Register your first customer to get started." /> : <div className="data-table">{customers.map((c) => <div className="table-row clickable" key={c.id} onClick={() => onSelect(c.id)}><div className="avatar small-avatar">{c.full_name.slice(0, 1)}</div><div><strong>{c.full_name}</strong><span>{c.email ?? c.phone}</span></div><span className="table-muted">{c.phone}</span><span className={`status ${statusStyles[c.status] ?? ''}`}>{c.status}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
   </SectionPanel>;
 }
 
-function CustomerDetail({ id, onBack, onNewVehicle, onNewJob }: { id: string; onBack: () => void; onNewVehicle: () => void; onNewJob: () => void }) {
+function CustomerDetail({ id, onBack, onNewVehicle, onNewJob, can }: { id: string; onBack: () => void; onNewVehicle: () => void; onNewJob: () => void; can: (p: string) => boolean }) {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [jobs, setJobs] = useState<JobCard[]>([]);
@@ -561,7 +618,7 @@ function CustomerDetail({ id, onBack, onNewVehicle, onNewJob }: { id: string; on
     <div className="detail-header">
       <div className="detail-avatar">{customer.full_name.slice(0, 1)}</div>
       <div className="flex-1"><h2>{customer.full_name}</h2><p className="muted">{customer.customer_type} · {customer.company_name ?? 'No company'}</p></div>
-      <div className="detail-actions"><button className="button secondary" onClick={onNewVehicle}><Plus size={16} /> Add vehicle</button><button className="button primary" onClick={onNewJob}><Plus size={16} /> New work order</button></div>
+      <div className="detail-actions">{can('vehicle.create') && <button className="button secondary" onClick={onNewVehicle}><Plus size={16} /> Add vehicle</button>}{can('job.create') && <button className="button primary" onClick={onNewJob}><Plus size={16} /> New work order</button>}</div>
     </div>
     <div className="detail-info-grid">
       <div className="info-card"><Phone size={16} /> <div><span>Phone</span><strong>{customer.phone}</strong></div></div>
@@ -593,7 +650,7 @@ function VehiclesSection({ query, onSelect }: { query: string; onSelect: (id: st
   </SectionPanel>;
 }
 
-function VehicleDetail({ id, onBack, onNewJob }: { id: string; onBack: () => void; onNewJob: () => void }) {
+function VehicleDetail({ id, onBack, onNewJob, can }: { id: string; onBack: () => void; onNewJob: () => void; can: (p: string) => boolean }) {
   const [vehicle, setVehicle] = useState<(Vehicle & { customers: Customer | null }) | null>(null);
   const [jobs, setJobs] = useState<(JobCard & { job_card_labour: JobCardLabour[]; job_card_parts: JobCardPart[]; job_card_diagnosis: JobCardDiagnosis[] })[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -613,7 +670,7 @@ function VehicleDetail({ id, onBack, onNewJob }: { id: string; onBack: () => voi
     <div className="detail-header">
       <div className="detail-avatar vehicle"><CarFront size={24} /></div>
       <div className="flex-1"><h2>{vehicle.registration_number}</h2><p className="muted">{[vehicle.make, vehicle.model].filter(Boolean).join(' ') || 'Vehicle'} · {vehicle.year ?? '—'} · {vehicle.customers?.full_name ?? 'Customer'}</p></div>
-      <div className="detail-actions"><button className="button primary" onClick={onNewJob}><Plus size={16} /> New work order</button></div>
+      <div className="detail-actions">{can('job.create') && <button className="button primary" onClick={onNewJob}><Plus size={16} /> New work order</button>}</div>
     </div>
     <div className="detail-info-grid">
       <div className="info-card"><Gauge size={16} /> <div><span>Mileage</span><strong>{vehicle.mileage.toLocaleString()} KM</strong></div></div>
@@ -654,7 +711,7 @@ type JobExportRow = JobCard & {
   invoices: { total_minor: number; amount_paid_minor: number }[];
 };
 
-function JobsSection({ query, onNew, onSelect, onNotice }: { query: string; onNew: () => void; onSelect: (id: string) => void; onNotice: (m: string) => void }) {
+function JobsSection({ query, onNew, onSelect, onNotice, can }: { query: string; onNew: () => void; onSelect: (id: string) => void; onNotice: (m: string) => void; can: (p: string) => boolean }) {
   const [jobs, setJobs] = useState<(JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -715,7 +772,7 @@ function JobsSection({ query, onNew, onSelect, onNotice }: { query: string; onNe
       setJobs((data ?? []) as (JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[]); setLoading(false);
     })();
   }, [query, statusFilter, bucketFilter]);
-  return <SectionPanel eyebrow="Workshop execution" title="Work Orders" onNew={onNew} newLabel="New work order">
+  return <SectionPanel eyebrow="Workshop execution" title="Work Orders" onNew={can('job.create') ? onNew : undefined} newLabel="New work order">
     <div className="action-buttons" style={{ marginBottom: 16 }}>
       <button className="button secondary small" disabled={exporting} onClick={() => void exportWorkOrdersCSV()}><Download size={15} /> {exporting ? 'Exporting…' : 'Export CSV'}</button>
     </div>
@@ -1273,11 +1330,11 @@ function WorkOrderCopy({ job, labourTotal, partsTotal, blank }: { job: JobDetail
 }
 
 // === SERVICES ===
-function ServicesSection({ onNew }: { onNew: () => void }) {
+function ServicesSection({ onNew, can }: { onNew: () => void; can: (p: string) => boolean }) {
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => { supabase.from('services').select('*').order('name').then(({ data }) => { setServices((data ?? []) as Service[]); setLoading(false); }); }, []);
-  return <SectionPanel eyebrow="Service catalogue" title="Services" onNew={onNew} newLabel="Add service">
+  return <SectionPanel eyebrow="Service catalogue" title="Services" onNew={can('settings.manage') ? onNew : undefined} newLabel="Add service">
     {loading ? <Loading /> : services.length === 0 ? <Empty title="No services" text="Add your first service to the catalogue." /> : <div className="data-table">{services.map((s) => <div className="table-row" key={s.id}><div className="job-icon"><Wrench size={17} /></div><div><strong>{s.name}</strong><span>{s.category} · {s.estimated_minutes} min</span></div><span className="table-muted">{formatKes(s.standard_price_minor)}</span><span className={`status ${s.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{s.active ? 'Active' : 'Inactive'}</span></div>)}</div>}
   </SectionPanel>;
 }
@@ -1305,8 +1362,23 @@ function TechniciansSection({ onNew, can }: { onNew: () => void; can: (p: string
 }
 
 // === PARTS / INVENTORY ===
+const MOVEMENT_LABELS: Record<string, string> = {
+  OPENING_BALANCE: 'Opening Balance', PURCHASE: 'Purchase', SALE: 'Sale', SALE_REVERSAL: 'Sale Reversal',
+  JOB_CARD_USAGE: 'Workshop Issue', RETURN: 'Return', ADJUSTMENT_IN: 'Adjustment (In)',
+  ADJUSTMENT_OUT: 'Adjustment (Out)', DAMAGE: 'Damage / Loss', TRANSFER: 'Transfer',
+};
+
+function partCategoryType(category: string) { return category === 'Accessories' ? 'Accessory' : 'Spare'; }
+
+function partStockStatus(p: Part): { label: string; className: string } {
+  if (p.quantity_on_hand === 0) return { label: 'Out of stock', className: 'bg-red-50 text-red-700' };
+  if (p.quantity_on_hand <= p.reorder_level) return { label: 'Low stock', className: 'bg-amber-50 text-amber-700' };
+  return { label: 'In stock', className: 'bg-emerald-50 text-emerald-700' };
+}
+
 function PartsSection({ onNew, onReceive, onAdjust, onSelect, can }: { onNew: () => void; onReceive: () => void; onAdjust: () => void; onSelect: (id: string) => void; can: (p: string) => boolean }) {
   const [parts, setParts] = useState<Part[]>([]);
+  const [performance, setPerformance] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   useEffect(() => {
@@ -1317,36 +1389,90 @@ function PartsSection({ onNew, onReceive, onAdjust, onSelect, can }: { onNew: ()
       setParts((data ?? []) as Part[]); setLoading(false);
     })();
   }, [query]);
-  return <SectionPanel eyebrow="Spare parts" title="Parts" onNew={can('inventory.view') ? onNew : undefined} newLabel="Add part">
+  useEffect(() => {
+    (async () => {
+      const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const { data } = await supabase.from('sale_items').select('part_id,quantity,sales!inner(status,created_at)').gte('sales.created_at', thirtyDaysAgo.toISOString()).neq('sales.status', 'VOIDED').limit(2000);
+      const map: Record<string, number> = {};
+      for (const row of (data ?? []) as unknown as { part_id: string; quantity: number }[]) map[row.part_id] = (map[row.part_id] ?? 0) + row.quantity;
+      setPerformance(map);
+    })();
+  }, []);
+  return <SectionPanel eyebrow="Spare parts" title="Parts" onNew={can('inventory.create') ? onNew : undefined} newLabel="Add part">
     <div className="filter-bar"><Search size={15} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by SKU or name..." /></div>
     <div className="action-buttons" style={{ marginBottom: 16 }}>
       {can('inventory.receive') && <button className="button secondary small" onClick={onReceive}><Plus size={15} /> Receive stock</button>}
       {can('inventory.adjust') && <button className="button secondary small" onClick={onAdjust}><Edit size={15} /> Adjust stock</button>}
     </div>
-    {loading ? <Loading /> : parts.length === 0 ? <Empty title="No parts" text="Add your first part to inventory." /> : <div className="data-table">{parts.map((p) => <div className="table-row clickable" key={p.id} onClick={() => onSelect(p.id)}><div className="job-icon"><Package size={17} /></div><div><strong>{p.name}</strong><span>{p.sku} · {p.brand ?? 'No brand'}</span></div><span className="table-muted">Buy {formatKes(p.cost_price_minor)} · Sell {formatKes(p.selling_price_minor)}</span><span className={`status ${p.quantity_on_hand <= p.reorder_level ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>{p.quantity_on_hand} in stock</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
+    {loading ? <Loading /> : parts.length === 0 ? <Empty title="No parts" text="Add your first part to inventory." /> : <>
+      <div className="parts-table-wrap"><table className="report-table parts-table"><thead><tr>
+        <th>Part Name</th><th>Part Number</th><th className="numeric">Buying Price</th><th className="numeric">Selling Price</th><th className="numeric">Stock</th><th>Performance</th><th>Status</th><th>Category</th>
+      </tr></thead><tbody>{parts.map((p) => {
+        const status = partStockStatus(p); const sold = performance[p.id] ?? 0;
+        return <tr key={p.id} className="clickable" onClick={() => onSelect(p.id)}>
+          <td><strong>{p.name}</strong>{p.brand && <span className="table-subtext">{p.brand}</span>}</td>
+          <td>{p.sku}</td>
+          <td className="numeric">{formatKes(p.cost_price_minor)}</td>
+          <td className="numeric">{formatKes(p.selling_price_minor)}</td>
+          <td className="numeric">{p.quantity_on_hand}</td>
+          <td>{sold > 0 ? <span className="performance-tag up"><TrendingUp size={13} /> {sold} sold (30d)</span> : <span className="performance-tag flat">No recent sales</span>}</td>
+          <td><span className={`status ${status.className}`}>{status.label}</span></td>
+          <td><span className="category-tag">{partCategoryType(p.category)}</span><span className="table-subtext">{p.category}</span></td>
+        </tr>;
+      })}</tbody></table></div>
+      <div className="parts-card-grid">{parts.map((p) => {
+        const status = partStockStatus(p); const sold = performance[p.id] ?? 0;
+        return <button key={p.id} type="button" className="part-card" onClick={() => onSelect(p.id)}>
+          <div className="part-card-top"><div className="job-icon"><Package size={17} /></div><span className={`status ${status.className}`}>{status.label}</span></div>
+          <strong>{p.name}</strong>
+          <span className="part-card-meta">{p.sku} · {partCategoryType(p.category)}</span>
+          <div className="part-card-prices"><span>Buy {formatKes(p.cost_price_minor)}</span><span>Sell {formatKes(p.selling_price_minor)}</span></div>
+          <div className="part-card-foot"><span>{p.quantity_on_hand} in stock</span>{sold > 0 && <span className="performance-tag up"><TrendingUp size={12} /> {sold} sold</span>}</div>
+        </button>;
+      })}</div>
+    </>}
   </SectionPanel>;
 }
 
-function PartDetail({ id, onBack }: { id: string; onBack: () => void }) {
+function PartDetail({ id, onBack, can, onNotice, onNavigateToSale, onNavigateToJob, onNavigateToPO }: { id: string; onBack: () => void; can: (p: string) => boolean; onNotice: (m: string) => void; onNavigateToSale?: (id: string) => void; onNavigateToJob?: (id: string) => void; onNavigateToPO?: (id: string) => void }) {
   const [part, setPart] = useState<Part | null>(null);
   const [movements, setMovements] = useState<StockMovement[]>([]);
+  const [actorNames, setActorNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    (async () => {
-      const [{ data: partData }, { data: movementData }] = await Promise.all([
-        supabase.from('parts').select('*').eq('id', id).maybeSingle(),
-        supabase.from('stock_movements').select('*').eq('part_id', id).order('created_at', { ascending: false }).limit(20),
-      ]);
-      setPart(partData as Part | null); setMovements((movementData ?? []) as StockMovement[]); setLoading(false);
-    })();
+  const [showEdit, setShowEdit] = useState(false);
+
+  const load = useCallback(async () => {
+    const [{ data: partData }, { data: movementData }] = await Promise.all([
+      supabase.from('parts').select('*').eq('id', id).maybeSingle(),
+      supabase.from('stock_movements').select('*').eq('part_id', id).order('created_at', { ascending: false }).limit(30),
+    ]);
+    const movementRows = (movementData ?? []) as StockMovement[];
+    setPart(partData as Part | null); setMovements(movementRows); setLoading(false);
+    const userIds = Array.from(new Set(movementRows.map((m) => m.user_id).filter(Boolean))) as string[];
+    if (userIds.length > 0) {
+      const { data: profileRows } = await supabase.from('profiles').select('id,full_name').in('id', userIds);
+      const map: Record<string, string> = {};
+      for (const row of (profileRows ?? []) as { id: string; full_name: string }[]) map[row.id] = row.full_name;
+      setActorNames(map);
+    }
   }, [id]);
+  useEffect(() => { void load(); }, [load]);
+
   if (loading) return <Loading />;
   if (!part) return <><BackBar onBack={onBack} label="Parts" /><Empty title="Part not found" text="This part may have been removed." /></>;
   const stockValue = part.cost_price_minor * part.quantity_on_hand;
   const margin = part.selling_price_minor - part.cost_price_minor;
+  const status = partStockStatus(part);
   return <>
     <BackBar onBack={onBack} label="Parts" />
-    <div className="detail-header"><div className="detail-avatar"><Package size={24} /></div><div className="flex-1"><h2>{part.name}</h2><p className="muted">{part.sku} · {part.category}{part.brand ? ` · ${part.brand}` : ''}</p></div><span className={`status ${part.quantity_on_hand <= part.reorder_level ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>{part.quantity_on_hand} in stock</span></div>
+    <div className="detail-header">
+      <div className="detail-avatar"><Package size={24} /></div>
+      <div className="flex-1"><h2>{part.name}</h2><p className="muted">{part.sku} · {partCategoryType(part.category)} ({part.category}){part.brand ? ` · ${part.brand}` : ''}</p></div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+        <span className={`status ${status.className}`}>{status.label}</span>
+        {can('inventory.update') && <button className="button secondary small" onClick={() => setShowEdit(true)}><Edit size={15} /> Edit part</button>}
+      </div>
+    </div>
     <div className="detail-info-grid">
       <div className="info-card"><CircleDollarSign size={16} /> <div><span>Buying price</span><strong>{formatKes(part.cost_price_minor)}</strong></div></div>
       <div className="info-card"><CircleDollarSign size={16} /> <div><span>Selling price</span><strong>{formatKes(part.selling_price_minor)}</strong></div></div>
@@ -1355,9 +1481,30 @@ function PartDetail({ id, onBack }: { id: string; onBack: () => void }) {
       <div className="info-card"><Package size={16} /> <div><span>Quantity on hand</span><strong>{part.quantity_on_hand}</strong></div></div>
       <div className="info-card"><AlertTriangle size={16} /> <div><span>Reorder level</span><strong>{part.reorder_level}</strong></div></div>
       {part.location && <div className="info-card"><MapPin size={16} /> <div><span>Location</span><strong>{part.location}</strong></div></div>}
-      <div className="info-card"><ShieldCheck size={16} /> <div><span>Status</span><strong>{part.active ? 'Active' : 'Inactive'}</strong></div></div>
+      <div className="info-card"><ShieldCheck size={16} /> <div><span>Active</span><strong>{part.active ? 'Yes' : 'No'}</strong></div></div>
     </div>
-    <section className="panel" style={{ marginTop: 20 }}><div className="panel-heading"><div><p className="eyebrow">Audit trail</p><h3>Recent stock movements</h3></div></div>{movements.length === 0 ? <Empty title="No stock movements" text="Movements for this part will appear here." /> : <div className="data-table">{movements.map((m) => <div className="table-row" key={m.id}><div className="job-icon"><Boxes size={17} /></div><div><strong>{m.movement_type.replaceAll('_', ' ')}</strong><span>{m.reference ?? '—'} · {formatDateTime(m.created_at)}</span></div><span className="table-muted">{m.previous_balance} → {m.new_balance}</span><span className={`status ${m.quantity >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>{m.quantity >= 0 ? '+' : ''}{m.quantity}</span></div>)}</div>}</section>
+    <section className="panel table-panel" style={{ marginTop: 20 }}>
+      <div className="panel-heading"><div><p className="eyebrow">Audit trail</p><h3>Recent stock movements</h3></div></div>
+      {movements.length === 0 ? <Empty title="No stock movements" text="Movements for this part will appear here." /> : <div className="report-table-wrap"><table className="report-table"><thead><tr>
+        <th>Date</th><th>Reference</th><th>Movement</th><th className="numeric">Qty</th><th className="numeric">Balance</th>
+      </tr></thead><tbody>{movements.map((m) => {
+        let navigate: ((id: string) => void) | undefined;
+        if (m.reference_id) {
+          if (m.movement_type === 'SALE' || m.movement_type === 'SALE_REVERSAL') navigate = onNavigateToSale;
+          else if (m.movement_type === 'JOB_CARD_USAGE') navigate = onNavigateToJob;
+          else if (m.movement_type === 'PURCHASE') navigate = onNavigateToPO;
+        }
+        const actor = m.user_id ? actorNames[m.user_id] : undefined;
+        return <tr key={m.id}>
+          <td>{formatDateTime(m.created_at)}</td>
+          <td>{(() => { const go = navigate; const refId = m.reference_id; return go && refId ? <button type="button" className="text-button" style={{ padding: 0 }} onClick={() => go(refId)}>{m.reference ?? '—'}</button> : (m.reference ?? '—'); })()}</td>
+          <td><strong>{MOVEMENT_LABELS[m.movement_type] ?? m.movement_type.replaceAll('_', ' ')}</strong>{(m.reason || actor) && <span className="table-subtext">{[actor ? `By ${actor}` : null, m.reason].filter(Boolean).join(' · ')}</span>}</td>
+          <td className="numeric"><span className={`status ${m.quantity >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>{m.quantity >= 0 ? '+' : ''}{m.quantity}</span></td>
+          <td className="numeric">{m.new_balance}</td>
+        </tr>;
+      })}</tbody></table></div>}
+    </section>
+    {showEdit && <PartForm part={part} onClose={() => setShowEdit(false)} onSaved={(m) => { setShowEdit(false); onNotice(m); void load(); }} />}
   </>;
 }
 
@@ -1382,7 +1529,7 @@ function LowStockSection() {
 }
 
 // === SUPPLIERS ===
-function SuppliersSection({ query, onNew, onSelect }: { query: string; onNew: () => void; onSelect: (id: string) => void }) {
+function SuppliersSection({ query, onNew, onSelect, can }: { query: string; onNew: () => void; onSelect: (id: string) => void; can: (p: string) => boolean }) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -1393,12 +1540,12 @@ function SuppliersSection({ query, onNew, onSelect }: { query: string; onNew: ()
       setSuppliers((data ?? []) as Supplier[]); setLoading(false);
     })();
   }, [query]);
-  return <SectionPanel eyebrow="Vendor directory" title="Suppliers" onNew={onNew} newLabel="Add supplier">
+  return <SectionPanel eyebrow="Vendor directory" title="Suppliers" onNew={can('supplier.create') ? onNew : undefined} newLabel="Add supplier">
     {loading ? <Loading /> : suppliers.length === 0 ? <Empty title="No suppliers" text="Add your first supplier." /> : <div className="data-table">{suppliers.map((s) => <div className="table-row clickable" key={s.id} onClick={() => onSelect(s.id)}><div className="job-icon"><Truck size={17} /></div><div><strong>{s.name}</strong><span>{s.contact_person ?? 'No contact'}</span></div><span className="table-muted">{s.phone}</span><span className={`status ${statusStyles[s.status] ?? ''}`}>{s.status}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
   </SectionPanel>;
 }
 
-function SupplierDetail({ id, onBack, onNewPO }: { id: string; onBack: () => void; onNewPO: () => void }) {
+function SupplierDetail({ id, onBack, onNewPO, can }: { id: string; onBack: () => void; onNewPO: () => void; can: (p: string) => boolean }) {
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [pos, setPOs] = useState<PurchaseOrder[]>([]);
   useEffect(() => {
@@ -1414,7 +1561,7 @@ function SupplierDetail({ id, onBack, onNewPO }: { id: string; onBack: () => voi
   const totalSpent = pos.reduce((s, p) => s + p.total_minor, 0);
   return <>
     <BackBar onBack={onBack} label="Suppliers" />
-    <div className="detail-header"><div className="detail-avatar supplier"><Truck size={24} /></div><div className="flex-1"><h2>{supplier.name}</h2><p className="muted">{supplier.contact_person ?? 'No contact person'}</p></div><button className="button primary" onClick={onNewPO}><Plus size={16} /> New PO</button></div>
+    <div className="detail-header"><div className="detail-avatar supplier"><Truck size={24} /></div><div className="flex-1"><h2>{supplier.name}</h2><p className="muted">{supplier.contact_person ?? 'No contact person'}</p></div>{can('purchase_order.create') && <button className="button primary" onClick={onNewPO}><Plus size={16} /> New PO</button>}</div>
     <div className="detail-info-grid">
       <div className="info-card"><Phone size={16} /> <div><span>Phone</span><strong>{supplier.phone}</strong></div></div>
       {supplier.email && <div className="info-card"><Mail size={16} /> <div><span>Email</span><strong>{supplier.email}</strong></div></div>}
@@ -1426,11 +1573,11 @@ function SupplierDetail({ id, onBack, onNewPO }: { id: string; onBack: () => voi
 }
 
 // === PROCUREMENT ===
-function ProcurementSection({ onNew, onSelect }: { onNew: () => void; onSelect: (id: string) => void }) {
+function ProcurementSection({ onNew, onSelect, can }: { onNew: () => void; onSelect: (id: string) => void; can: (p: string) => boolean }) {
   const [pos, setPOs] = useState<(PurchaseOrder & { suppliers: { name: string } | null })[]>([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => { supabase.from('purchase_orders').select('*, suppliers(name)').order('created_at', { ascending: false }).limit(100).then(({ data }) => { setPOs((data ?? []) as (PurchaseOrder & { suppliers: { name: string } | null })[]); setLoading(false); }); }, []);
-  return <SectionPanel eyebrow="Purchase orders" title="Procurement" onNew={onNew} newLabel="New PO">
+  return <SectionPanel eyebrow="Purchase orders" title="Procurement" onNew={can('purchase_order.create') ? onNew : undefined} newLabel="New PO">
     {loading ? <Loading /> : pos.length === 0 ? <Empty title="No purchase orders" text="Create your first purchase order." /> : <div className="data-table">{pos.map((p) => <div className="table-row clickable" key={p.id} onClick={() => onSelect(p.id)}><div className="job-icon"><ShoppingCart size={17} /></div><div><strong>{p.po_number}</strong><span>{p.suppliers?.name ?? 'Supplier'} · {formatDate(p.order_date)}</span></div><span className="table-muted">{formatKes(p.total_minor)}</span><span className={`status ${statusStyles[p.status] ?? ''}`}>{p.status.replaceAll('_', ' ')}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
   </SectionPanel>;
 }
@@ -1443,7 +1590,7 @@ function PODetail({ id, onBack, can, onNotice, onRefresh }: { id: string; onBack
   async function receiveGoods(itemId: string, partId: string, unitCost: number) {
     const qty = parseInt(receiveQty[itemId] ?? '0');
     if (qty <= 0) return;
-    const { error } = await supabase.rpc('receive_stock', { p_part_id: partId, p_quantity: qty, p_unit_cost_minor: unitCost, p_reference: po?.po_number ?? 'PO' });
+    const { error } = await supabase.rpc('receive_stock', { p_part_id: partId, p_quantity: qty, p_unit_cost_minor: unitCost, p_reference: po?.po_number ?? 'PO', p_reference_id: id });
     if (error) { onNotice('Unable to receive goods. Please try again.'); return; }
     await supabase.from('goods_receipts').insert({ purchase_order_id: id, part_id: partId, quantity_received: qty, unit_cost_minor: unitCost });
     await supabase.from('purchase_order_items').update({ quantity_received: (po?.purchase_order_items.find((i) => i.id === itemId)?.quantity_received ?? 0) + qty }).eq('id', itemId);
@@ -1473,11 +1620,11 @@ function PODetail({ id, onBack, can, onNotice, onRefresh }: { id: string; onBack
 }
 
 // === QUOTATIONS ===
-function QuotationsSection({ onNew, onSelect }: { onNew: () => void; onSelect: (id: string) => void }) {
+function QuotationsSection({ onNew, onSelect, can }: { onNew: () => void; onSelect: (id: string) => void; can: (p: string) => boolean }) {
   const [quotes, setQuotes] = useState<(Quotation & { customers: { full_name: string } | null })[]>([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => { supabase.from('quotations').select('*, customers(full_name)').order('created_at', { ascending: false }).limit(100).then(({ data }) => { setQuotes((data ?? []) as (Quotation & { customers: { full_name: string } | null })[]); setLoading(false); }); }, []);
-  return <SectionPanel eyebrow="Pricing" title="Quotations" onNew={onNew} newLabel="New quotation">
+  return <SectionPanel eyebrow="Pricing" title="Quotations" onNew={can('quotation.create') ? onNew : undefined} newLabel="New quotation">
     {loading ? <Loading /> : quotes.length === 0 ? <Empty title="No quotations" text="Create a quotation from a work order." /> : <div className="data-table">{quotes.map((q) => <div className="table-row clickable" key={q.id} onClick={() => onSelect(q.id)}><div className="job-icon"><FileText size={17} /></div><div><strong>{q.quote_number}</strong><span>{q.customers?.full_name ?? 'Customer'}</span></div><span className="table-muted">{formatKes(q.total_minor)}</span><span className={`status ${statusStyles[q.status] ?? ''}`}>{q.status.replaceAll('_', ' ')}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
   </SectionPanel>;
 }
@@ -1526,7 +1673,7 @@ function QuotationDetail({ id, onBack, can, onNotice, onRefresh }: { id: string;
 }
 
 // === INVOICES ===
-function InvoicesSection({ query, onNew, onSelect }: { query: string; onNew: () => void; onSelect: (id: string) => void }) {
+function InvoicesSection({ query, onNew, onSelect, can }: { query: string; onNew: () => void; onSelect: (id: string) => void; can: (p: string) => boolean }) {
   const [invoices, setInvoices] = useState<(Invoice & { customers: { full_name: string } | null })[]>([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -1537,19 +1684,19 @@ function InvoicesSection({ query, onNew, onSelect }: { query: string; onNew: () 
       setInvoices((data ?? []) as (Invoice & { customers: { full_name: string } | null })[]); setLoading(false);
     })();
   }, [query]);
-  return <SectionPanel eyebrow="Billing" title="Invoices" onNew={onNew} newLabel="New invoice">
+  return <SectionPanel eyebrow="Billing" title="Invoices" onNew={can('invoice.create') ? onNew : undefined} newLabel="New invoice">
     {loading ? <Loading /> : invoices.length === 0 ? <Empty title="No invoices" text="Create an invoice from a work order or quotation." /> : <div className="data-table">{invoices.map((inv) => <div className="table-row clickable" key={inv.id} onClick={() => onSelect(inv.id)}><div className="job-icon"><CircleDollarSign size={17} /></div><div><strong>{inv.invoice_number}</strong><span>{inv.customers?.full_name ?? 'Customer'}</span></div><span className="table-muted">{formatKes(inv.total_minor)}</span><span className="table-muted">{formatKes(inv.amount_paid_minor)} paid</span><span className={`status ${statusStyles[inv.status] ?? ''}`}>{inv.status.replaceAll('_', ' ')}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
   </SectionPanel>;
 }
 
-function InvoiceDetail({ id, onBack, onPayment }: { id: string; onBack: () => void; onPayment: () => void }) {
-  const [invoice, setInvoice] = useState<(Invoice & { customers: Customer | null; vehicles: Vehicle | null; invoice_items: InvoiceItem[]; payments: Payment[] }) | null>(null);
-  useEffect(() => { supabase.from('invoices').select('*, customers(*), vehicles(*), invoice_items(*), payments(*)').eq('id', id).maybeSingle().then(({ data }) => setInvoice(data as (Invoice & { customers: Customer | null; vehicles: Vehicle | null; invoice_items: InvoiceItem[]; payments: Payment[] }) | null)); }, [id]);
+function InvoiceDetail({ id, onBack, onPayment, can }: { id: string; onBack: () => void; onPayment: () => void; can: (p: string) => boolean }) {
+  const [invoice, setInvoice] = useState<(Invoice & { customers: Customer | null; vehicles: Vehicle | null; invoice_items: InvoiceItem[]; payments: Payment[]; job_cards: { job_number: string } | null }) | null>(null);
+  useEffect(() => { supabase.from('invoices').select('*, customers(*), vehicles(*), invoice_items(*), payments(*), job_cards(job_number)').eq('id', id).maybeSingle().then(({ data }) => setInvoice(data as (Invoice & { customers: Customer | null; vehicles: Vehicle | null; invoice_items: InvoiceItem[]; payments: Payment[]; job_cards: { job_number: string } | null }) | null)); }, [id]);
   if (!invoice) return <Loading />;
   const balance = invoice.total_minor - invoice.amount_paid_minor;
   return <>
     <BackBar onBack={onBack} label="Invoices" />
-    <div className="detail-header"><div className="detail-avatar invoice"><CircleDollarSign size={24} /></div><div className="flex-1"><h2>{invoice.invoice_number}</h2><p className="muted">{invoice.customers?.full_name ?? 'Customer'} · Due {formatDate(invoice.due_date)}</p></div><span className={`status ${statusStyles[invoice.status] ?? ''}`}>{invoice.status.replaceAll('_', ' ')}</span></div>
+    <div className="detail-header"><div className="detail-avatar invoice"><CircleDollarSign size={24} /></div><div className="flex-1"><h2>{invoice.invoice_number}</h2><p className="muted">{invoice.customers?.full_name ?? 'Customer'} · Work Order {invoice.job_cards?.job_number ?? '—'} · Due {formatDate(invoice.due_date)}</p></div><span className={`status ${statusStyles[invoice.status] ?? ''}`}>{invoice.status.replaceAll('_', ' ')}</span></div>
     <div className="detail-info-grid">
       <div className="info-card"><CircleDollarSign size={16} /> <div><span>Total</span><strong>{formatKes(invoice.total_minor)}</strong></div></div>
       <div className="info-card"><CheckCircle2 size={16} /> <div><span>Paid</span><strong>{formatKes(invoice.amount_paid_minor)}</strong></div></div>
@@ -1557,76 +1704,223 @@ function InvoiceDetail({ id, onBack, onPayment }: { id: string; onBack: () => vo
     </div>
     <div className="dashboard-grid" style={{ marginTop: 20 }}>
       <section className="panel"><div className="panel-heading"><div><p className="eyebrow">Line items</p><h3>Invoice items</h3></div></div>{invoice.invoice_items.length === 0 ? <Empty title="No items" text="This invoice has no items." /> : <div className="data-table">{invoice.invoice_items.map((item) => <div className="table-row" key={item.id}><div><strong>{item.description}</strong><span>{item.item_type} · {item.quantity} × {formatKes(item.unit_price_minor)}</span></div><span className="table-muted">{formatKes(item.line_total_minor)}</span></div>)}</div>}<div className="total-row"><strong>Grand total</strong><span>{formatKes(invoice.total_minor)}</span></div></section>
-      <section className="panel"><div className="panel-heading"><div><p className="eyebrow">Reconciliation</p><h3>Payments</h3></div>{balance > 0 && <button className="button primary small" onClick={onPayment}><Plus size={15} /> Record payment</button>}</div>{invoice.payments.length === 0 ? <Empty title="No payments" text="Record a payment against this invoice." /> : <div className="data-table">{invoice.payments.map((p) => <div className="table-row" key={p.id}><div className="job-icon"><Banknote size={17} /></div><div><strong>{formatKes(p.amount_minor)}</strong><span>{p.method} · {formatDate(p.paid_at)}</span></div><span className="table-muted">{p.reference ?? '—'}</span></div>)}</div>}</section>
+      <section className="panel"><div className="panel-heading"><div><p className="eyebrow">Reconciliation</p><h3>Payments</h3></div>{balance > 0 && can('payment.create') && <button className="button primary small" onClick={onPayment}><Plus size={15} /> Record payment</button>}</div>{invoice.payments.length === 0 ? <Empty title="No payments" text="Record a payment against this invoice." /> : <div className="data-table">{invoice.payments.map((p) => <div className="table-row" key={p.id}><div className="job-icon"><Banknote size={17} /></div><div><strong>{formatKes(p.amount_minor)}</strong><span>{p.method} · {formatDate(p.paid_at)}</span></div><span className="table-muted">{p.reference ?? '—'}</span></div>)}</div>}</section>
     </div>
   </>;
 }
 
 // === PAYMENTS ===
 function PaymentsSection() {
-  const [payments, setPayments] = useState<(Payment & { invoices: { invoice_number: string } | null })[]>([]);
+  const [payments, setPayments] = useState<(Payment & { invoices: { invoice_number: string; job_cards: { job_number: string } | null } | null })[]>([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { supabase.from('payments').select('*, invoices(invoice_number)').order('paid_at', { ascending: false }).limit(100).then(({ data }) => { setPayments((data ?? []) as (Payment & { invoices: { invoice_number: string } | null })[]); setLoading(false); }); }, []);
+  useEffect(() => { supabase.from('payments').select('*, invoices(invoice_number, job_cards(job_number))').order('paid_at', { ascending: false }).limit(100).then(({ data }) => { setPayments((data ?? []) as (Payment & { invoices: { invoice_number: string; job_cards: { job_number: string } | null } | null })[]); setLoading(false); }); }, []);
   return <SectionPanel eyebrow="Transaction log" title="Payments">
-    {loading ? <Loading /> : payments.length === 0 ? <Empty title="No payments recorded" text="Payments will appear here once invoices are paid." /> : <div className="data-table">{payments.map((p) => <div className="table-row" key={p.id}><div className="job-icon"><Banknote size={17} /></div><div><strong>{formatKes(p.amount_minor)}</strong><span>{p.invoices?.invoice_number ?? 'Invoice'} · {p.method}</span></div><span className="table-muted">{formatDate(p.paid_at)}</span><span className="table-muted">{p.reference ?? '—'}</span></div>)}</div>}
+    {loading ? <Loading /> : payments.length === 0 ? <Empty title="No payments recorded" text="Payments will appear here once invoices are paid." /> : <div className="data-table">{payments.map((p) => <div className="table-row" key={p.id}><div className="job-icon"><Banknote size={17} /></div><div><strong>{formatKes(p.amount_minor)}</strong><span>{p.invoices?.invoice_number ?? 'Invoice'} · Work Order {p.invoices?.job_cards?.job_number ?? '—'} · {p.method}</span></div><span className="table-muted">{formatDate(p.paid_at)}</span><span className="table-muted">{p.reference ?? '—'}</span></div>)}</div>}
   </SectionPanel>;
 }
 
+type ReceiptPayment = Payment & { invoices: { invoice_number: string; total_minor: number; amount_paid_minor: number; customers: { full_name: string } | null; job_cards: { job_number: string } | null } | null };
+
 function ReceiptsSection() {
-  const [payments, setPayments] = useState<(Payment & { invoices: { invoice_number: string; total_minor: number; amount_paid_minor: number; customers: { full_name: string } | null } | null })[]>([]);
+  const [payments, setPayments] = useState<ReceiptPayment[]>([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { supabase.from('payments').select('*, invoices(invoice_number, total_minor, amount_paid_minor, customers(full_name))').order('paid_at', { ascending: false }).limit(50).then(({ data }) => { setPayments((data ?? []) as (Payment & { invoices: { invoice_number: string; total_minor: number; amount_paid_minor: number; customers: { full_name: string } | null } | null })[]); setLoading(false); }); }, []);
+  useEffect(() => { supabase.from('payments').select('*, invoices(invoice_number, total_minor, amount_paid_minor, customers(full_name), job_cards(job_number))').order('paid_at', { ascending: false }).limit(50).then(({ data }) => { setPayments((data ?? []) as ReceiptPayment[]); setLoading(false); }); }, []);
   return <SectionPanel eyebrow="Proof of payment" title="Receipts">
-    {loading ? <Loading /> : payments.length === 0 ? <Empty title="No receipts" text="Receipts are generated when payments are recorded." /> : <div className="data-table">{payments.map((p) => <div className="table-row" key={p.id}><div className="job-icon"><Receipt size={17} /></div><div><strong>RCP-{p.id.slice(-6).toUpperCase()}</strong><span>{p.invoices?.customers?.full_name ?? 'Customer'} · {p.invoices?.invoice_number ?? 'Invoice'}</span></div><span className="table-muted">{formatKes(p.amount_minor)}</span><span className="status bg-emerald-50 text-emerald-700">{p.method}</span></div>)}</div>}
+    {loading ? <Loading /> : payments.length === 0 ? <Empty title="No receipts" text="Receipts are generated when payments are recorded." /> : <div className="data-table">{payments.map((p) => <div className="table-row" key={p.id}><div className="job-icon"><Receipt size={17} /></div><div><strong>RCP-{p.id.slice(-6).toUpperCase()}</strong><span>{p.invoices?.customers?.full_name ?? 'Customer'} · {p.invoices?.invoice_number ?? 'Invoice'} · Work Order {p.invoices?.job_cards?.job_number ?? '—'}</span></div><span className="table-muted">{formatKes(p.amount_minor)}</span><span className="status bg-emerald-50 text-emerald-700">{p.method}</span></div>)}</div>}
   </SectionPanel>;
 }
 
 // === REPORTS ===
+type ReportRow = Record<string, unknown>;
+type ReportColumn = { key: string; label: string; numeric?: boolean; render: (row: ReportRow) => React.ReactNode; csv: (row: ReportRow) => string | number };
+type ReportKpi = { label: string; value: string; icon: React.ReactNode; tone: string };
+
+const REPORT_TYPES = [
+  { id: 'operations', label: 'Operations', icon: <ClipboardList size={16} /> },
+  { id: 'financial', label: 'Financial', icon: <CircleDollarSign size={16} /> },
+  { id: 'inventory', label: 'Inventory', icon: <Package size={16} /> },
+  { id: 'procurement', label: 'Procurement', icon: <ShoppingCart size={16} /> },
+  { id: 'technician', label: 'Technician', icon: <UserCog size={16} /> },
+  { id: 'scrap', label: 'Scrap', icon: <Recycle size={16} /> },
+];
+
+function reportStatusPill(status: unknown) {
+  const s = String(status ?? '');
+  return <span className={`status ${statusStyles[s] ?? ''}`}>{s.replaceAll('_', ' ')}</span>;
+}
+
+const REPORT_COLUMNS: Record<string, ReportColumn[]> = {
+  operations: [
+    { key: 'job_number', label: 'Work Order', render: (r) => String(r.job_number ?? '—'), csv: (r) => String(r.job_number ?? '') },
+    { key: 'created_at', label: 'Date', render: (r) => formatDate(r.created_at as string), csv: (r) => String(r.created_at ?? '') },
+    { key: 'customer', label: 'Customer', render: (r) => (r.customers as { full_name: string } | null)?.full_name ?? '—', csv: (r) => (r.customers as { full_name: string } | null)?.full_name ?? '' },
+    { key: 'vehicle', label: 'Vehicle', render: (r) => (r.vehicles as { registration_number: string } | null)?.registration_number ?? '—', csv: (r) => (r.vehicles as { registration_number: string } | null)?.registration_number ?? '' },
+    { key: 'status', label: 'Status', render: (r) => reportStatusPill(r.status), csv: (r) => String(r.status ?? '') },
+  ],
+  financial: [
+    { key: 'invoice_number', label: 'Invoice', render: (r) => String(r.invoice_number ?? '—'), csv: (r) => String(r.invoice_number ?? '') },
+    { key: 'job_number', label: 'Work Order', render: (r) => (r.job_cards as { job_number: string } | null)?.job_number ?? '—', csv: (r) => (r.job_cards as { job_number: string } | null)?.job_number ?? '' },
+    { key: 'created_at', label: 'Date', render: (r) => formatDate(r.created_at as string), csv: (r) => String(r.created_at ?? '') },
+    { key: 'customer', label: 'Customer', render: (r) => (r.customers as { full_name: string } | null)?.full_name ?? '—', csv: (r) => (r.customers as { full_name: string } | null)?.full_name ?? '' },
+    { key: 'total_minor', label: 'Total', numeric: true, render: (r) => formatKes(r.total_minor as number), csv: (r) => (((r.total_minor as number) ?? 0) / 100).toFixed(2) },
+    { key: 'amount_paid_minor', label: 'Paid', numeric: true, render: (r) => formatKes(r.amount_paid_minor as number), csv: (r) => (((r.amount_paid_minor as number) ?? 0) / 100).toFixed(2) },
+    { key: 'balance', label: 'Balance', numeric: true, render: (r) => formatKes((r.total_minor as number) - (r.amount_paid_minor as number)), csv: (r) => (((r.total_minor as number) - (r.amount_paid_minor as number)) / 100).toFixed(2) },
+    { key: 'status', label: 'Status', render: (r) => reportStatusPill(r.status), csv: (r) => String(r.status ?? '') },
+  ],
+  inventory: [
+    { key: 'sku', label: 'SKU', render: (r) => String(r.sku ?? '—'), csv: (r) => String(r.sku ?? '') },
+    { key: 'name', label: 'Part', render: (r) => String(r.name ?? '—'), csv: (r) => String(r.name ?? '') },
+    { key: 'category', label: 'Category', render: (r) => String(r.category ?? '—'), csv: (r) => String(r.category ?? '') },
+    { key: 'quantity_on_hand', label: 'In Stock', numeric: true, render: (r) => String(r.quantity_on_hand ?? 0), csv: (r) => Number(r.quantity_on_hand ?? 0) },
+    { key: 'reorder_level', label: 'Reorder Level', numeric: true, render: (r) => String(r.reorder_level ?? 0), csv: (r) => Number(r.reorder_level ?? 0) },
+    { key: 'selling_price_minor', label: 'Selling Price', numeric: true, render: (r) => formatKes(r.selling_price_minor as number), csv: (r) => (((r.selling_price_minor as number) ?? 0) / 100).toFixed(2) },
+    { key: 'stock_value', label: 'Stock Value', numeric: true, render: (r) => formatKes((r.cost_price_minor as number) * (r.quantity_on_hand as number)), csv: (r) => (((r.cost_price_minor as number) * (r.quantity_on_hand as number)) / 100).toFixed(2) },
+  ],
+  procurement: [
+    { key: 'po_number', label: 'PO Number', render: (r) => String(r.po_number ?? '—'), csv: (r) => String(r.po_number ?? '') },
+    { key: 'supplier', label: 'Supplier', render: (r) => (r.suppliers as { name: string } | null)?.name ?? '—', csv: (r) => (r.suppliers as { name: string } | null)?.name ?? '' },
+    { key: 'order_date', label: 'Order Date', render: (r) => formatDate(r.order_date as string), csv: (r) => String(r.order_date ?? '') },
+    { key: 'total_minor', label: 'Total', numeric: true, render: (r) => formatKes(r.total_minor as number), csv: (r) => (((r.total_minor as number) ?? 0) / 100).toFixed(2) },
+    { key: 'status', label: 'Status', render: (r) => reportStatusPill(r.status), csv: (r) => String(r.status ?? '') },
+  ],
+  technician: [
+    { key: 'full_name', label: 'Technician', render: (r) => String(r.full_name ?? '—'), csv: (r) => String(r.full_name ?? '') },
+    { key: 'specialization', label: 'Specialization', render: (r) => String(r.specialization ?? 'General mechanic'), csv: (r) => String(r.specialization ?? '') },
+    { key: 'phone', label: 'Phone', render: (r) => String(r.phone ?? '—'), csv: (r) => String(r.phone ?? '') },
+    { key: 'active_jobs', label: 'Active Jobs', numeric: true, render: (r) => String(r.active_jobs ?? 0), csv: (r) => Number(r.active_jobs ?? 0) },
+  ],
+  scrap: [
+    { key: 'date', label: 'Date', render: (r) => formatDate(r.date as string), csv: (r) => String(r.date ?? '') },
+    { key: 'scrap_item', label: 'Scrap Type', render: (r) => (r.scrap_items as { name: string } | null)?.name ?? '—', csv: (r) => (r.scrap_items as { name: string } | null)?.name ?? '' },
+    { key: 'supplier', label: 'Supplier', render: (r) => String(r.supplier ?? '—'), csv: (r) => String(r.supplier ?? '') },
+    { key: 'quantity_purchased', label: 'Weight', numeric: true, render: (r) => formatKg(r.quantity_purchased as number), csv: (r) => Number(r.quantity_purchased ?? 0) },
+    { key: 'rate_used_minor', label: 'Rate / KG', numeric: true, render: (r) => formatKes(r.rate_used_minor as number), csv: (r) => (((r.rate_used_minor as number) ?? 0) / 100).toFixed(2) },
+    { key: 'purchase_amount_minor', label: 'Amount', numeric: true, render: (r) => formatKes(r.purchase_amount_minor as number), csv: (r) => (((r.purchase_amount_minor as number) ?? 0) / 100).toFixed(2) },
+    { key: 'status', label: 'Status', render: (r) => reportStatusPill(r.status), csv: (r) => String(r.status ?? '') },
+  ],
+};
+
+function computeReportKpis(type: string, rows: ReportRow[]): ReportKpi[] {
+  if (type === 'operations') {
+    const completed = rows.filter((r) => r.status === 'COMPLETED').length;
+    const inProgress = rows.filter((r) => r.status === 'OPEN' || r.status === 'IN_PROGRESS').length;
+    const cancelled = rows.filter((r) => r.status === 'CANCELLED').length;
+    return [
+      { label: 'Total work orders', value: String(rows.length), icon: <ClipboardList size={17} />, tone: 'navy' },
+      { label: 'Completed', value: String(completed), icon: <CheckCircle2 size={17} />, tone: 'green' },
+      { label: 'In progress', value: String(inProgress), icon: <Activity size={17} />, tone: 'blue' },
+      { label: 'Cancelled', value: String(cancelled), icon: <X size={17} />, tone: 'gold' },
+    ];
+  }
+  if (type === 'financial') {
+    const totalInvoiced = rows.reduce((s, r) => s + ((r.total_minor as number) ?? 0), 0);
+    const totalPaid = rows.reduce((s, r) => s + ((r.amount_paid_minor as number) ?? 0), 0);
+    const overdue = rows.filter((r) => r.status === 'OVERDUE').length;
+    return [
+      { label: 'Total invoiced', value: formatKes(totalInvoiced), icon: <CircleDollarSign size={17} />, tone: 'navy' },
+      { label: 'Total collected', value: formatKes(totalPaid), icon: <CheckCircle2 size={17} />, tone: 'green' },
+      { label: 'Outstanding', value: formatKes(totalInvoiced - totalPaid), icon: <AlertTriangle size={17} />, tone: 'gold' },
+      { label: 'Overdue invoices', value: String(overdue), icon: <Clock size={17} />, tone: 'red' },
+    ];
+  }
+  if (type === 'inventory') {
+    const low = rows.filter((r) => (r.quantity_on_hand as number) > 0 && (r.quantity_on_hand as number) <= (r.reorder_level as number)).length;
+    const out = rows.filter((r) => (r.quantity_on_hand as number) === 0).length;
+    const stockValue = rows.reduce((s, r) => s + ((r.cost_price_minor as number) ?? 0) * ((r.quantity_on_hand as number) ?? 0), 0);
+    return [
+      { label: 'Total parts', value: String(rows.length), icon: <Package size={17} />, tone: 'navy' },
+      { label: 'Low stock', value: String(low), icon: <AlertTriangle size={17} />, tone: 'gold' },
+      { label: 'Out of stock', value: String(out), icon: <X size={17} />, tone: 'red' },
+      { label: 'Stock value', value: formatKes(stockValue), icon: <Boxes size={17} />, tone: 'blue' },
+    ];
+  }
+  if (type === 'procurement') {
+    const pending = rows.filter((r) => ['DRAFT', 'SUBMITTED', 'APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED'].includes(r.status as string)).length;
+    const spend = rows.reduce((s, r) => s + ((r.total_minor as number) ?? 0), 0);
+    return [
+      { label: 'Total purchase orders', value: String(rows.length), icon: <ShoppingCart size={17} />, tone: 'navy' },
+      { label: 'Pending', value: String(pending), icon: <Clock size={17} />, tone: 'gold' },
+      { label: 'Total spend', value: formatKes(spend), icon: <CircleDollarSign size={17} />, tone: 'blue' },
+    ];
+  }
+  if (type === 'technician') {
+    const activeJobsTotal = rows.reduce((s, r) => s + ((r.active_jobs as number) ?? 0), 0);
+    return [
+      { label: 'Active technicians', value: String(rows.length), icon: <UserCog size={17} />, tone: 'navy' },
+      { label: 'Jobs in progress', value: String(activeJobsTotal), icon: <Wrench size={17} />, tone: 'blue' },
+    ];
+  }
+  const totalWeight = rows.reduce((s, r) => s + ((r.quantity_purchased as number) ?? 0), 0);
+  const totalValue = rows.reduce((s, r) => s + ((r.purchase_amount_minor as number) ?? 0), 0);
+  const avgRate = totalWeight > 0 ? Math.round(totalValue / totalWeight) : 0;
+  return [
+    { label: 'Total purchases', value: String(rows.length), icon: <Recycle size={17} />, tone: 'navy' },
+    { label: 'Total weight', value: formatKg(totalWeight), icon: <Boxes size={17} />, tone: 'blue' },
+    { label: 'Total value', value: formatKes(totalValue), icon: <CircleDollarSign size={17} />, tone: 'green' },
+    { label: 'Avg rate / KG', value: formatKes(avgRate), icon: <TrendingUp size={17} />, tone: 'gold' },
+  ];
+}
+
 function ReportsSection() {
   const [reportType, setReportType] = useState('operations');
-  const [data, setData] = useState<Record<string, unknown>[]>([]);
+  const [rows, setRows] = useState<ReportRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const reportTypes = [
-    { id: 'operations', label: 'Operations', icon: <ClipboardList size={16} /> },
-    { id: 'financial', label: 'Financial', icon: <CircleDollarSign size={16} /> },
-    { id: 'inventory', label: 'Inventory', icon: <Package size={16} /> },
-    { id: 'procurement', label: 'Procurement', icon: <ShoppingCart size={16} /> },
-    { id: 'technician', label: 'Technician', icon: <UserCog size={16} /> },
-  ];
+
   useEffect(() => {
     (async () => {
       setLoading(true);
-      let result: Record<string, unknown>[] = [];
-      if (reportType === 'operations') { const { data: jobs } = await supabase.from('job_cards').select('job_number,status,priority,created_at').is('deleted_at', null).order('created_at', { ascending: false }).limit(50); result = (jobs ?? []) as Record<string, unknown>[]; }
-      else if (reportType === 'financial') { const { data: invs } = await supabase.from('invoices').select('invoice_number,total_minor,amount_paid_minor,status,created_at').order('created_at', { ascending: false }).limit(50); result = (invs ?? []) as Record<string, unknown>[]; }
-      else if (reportType === 'inventory') { const { data: parts } = await supabase.from('parts').select('sku,name,quantity_on_hand,reorder_level,selling_price_minor').eq('active', true).order('name'); result = (parts ?? []) as Record<string, unknown>[]; }
-      else if (reportType === 'procurement') { const { data: pos } = await supabase.from('purchase_orders').select('po_number,status,total_minor,order_date').order('created_at', { ascending: false }).limit(50); result = (pos ?? []) as Record<string, unknown>[]; }
-      else if (reportType === 'technician') { const { data: emps } = await supabase.from('employees').select('full_name,role,specialization,active').eq('active', true); result = (emps ?? []) as Record<string, unknown>[]; }
-      setData(result); setLoading(false);
+      let result: ReportRow[] = [];
+      if (reportType === 'operations') {
+        const { data } = await supabase.from('job_cards').select('job_number,status,created_at,customers(full_name),vehicles(registration_number)').is('deleted_at', null).order('created_at', { ascending: false }).limit(100);
+        result = (data ?? []) as ReportRow[];
+      } else if (reportType === 'financial') {
+        const { data } = await supabase.from('invoices').select('invoice_number,status,created_at,total_minor,amount_paid_minor,customers(full_name),job_cards(job_number)').order('created_at', { ascending: false }).limit(100);
+        result = (data ?? []) as ReportRow[];
+      } else if (reportType === 'inventory') {
+        const { data } = await supabase.from('parts').select('sku,name,category,quantity_on_hand,reorder_level,cost_price_minor,selling_price_minor').eq('active', true).order('name');
+        result = (data ?? []) as ReportRow[];
+      } else if (reportType === 'procurement') {
+        const { data } = await supabase.from('purchase_orders').select('po_number,status,order_date,total_minor,suppliers(name)').order('created_at', { ascending: false }).limit(100);
+        result = (data ?? []) as ReportRow[];
+      } else if (reportType === 'technician') {
+        const { data: emps } = await supabase.from('employees').select('full_name,specialization,phone,user_id').eq('active', true).order('full_name');
+        const empList = (emps ?? []) as ReportRow[];
+        for (const emp of empList) {
+          const userId = emp.user_id as string | null;
+          emp.active_jobs = userId ? (await supabase.from('job_card_assignments').select('id', { count: 'exact', head: true }).eq('technician_id', userId).is('completed_at', null)).count ?? 0 : 0;
+        }
+        result = empList;
+      } else if (reportType === 'scrap') {
+        const { data } = await supabase.from('scrap_purchases').select('date,supplier,quantity_purchased,rate_used_minor,purchase_amount_minor,status,scrap_items(name)').eq('status', 'ACTIVE').order('date', { ascending: false }).limit(100);
+        result = (data ?? []) as ReportRow[];
+      }
+      setRows(result); setLoading(false);
     })();
   }, [reportType]);
 
+  const kpis = useMemo(() => computeReportKpis(reportType, rows), [reportType, rows]);
+  const columns = REPORT_COLUMNS[reportType];
+
   function exportCSV() {
-    if (data.length === 0) return;
-    const headers = Object.keys(data[0]);
-    const rows = data.map((row) => headers.map((h) => JSON.stringify(row[h] ?? '')).join(','));
-    const csv = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `${reportType}-report.csv`; a.click();
+    downloadCSV(`Oakland_${reportType}_report_${new Date().toISOString().slice(0, 10)}.csv`, rows.map((r) => {
+      const out: Record<string, unknown> = {};
+      for (const col of columns) out[col.label] = col.csv(r);
+      return out;
+    }));
   }
 
   return <>
     <div className="page-heading"><div><p className="eyebrow">Business intelligence</p><h1>Reports</h1><p className="muted">Export and analyze your workshop data.</p></div><div className="heading-actions"><button className="button secondary" onClick={exportCSV}><Download size={16} /> Export CSV</button></div></div>
-    <div className="report-tabs">{reportTypes.map((t) => <button key={t.id} className={reportType === t.id ? 'report-tab active' : 'report-tab'} onClick={() => setReportType(t.id)}>{t.icon} {t.label}</button>)}</div>
-    <section className="panel" style={{ marginTop: 20 }}>
-      {loading ? <Loading /> : data.length === 0 ? <Empty title="No data" text="No records for this report." /> : <div className="report-table"><table><thead><tr>{Object.keys(data[0]).map((key) => <th key={key}>{key.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{data.map((row, i) => <tr key={i}>{Object.values(row).map((val, j) => <td key={j}>{typeof val === 'number' && Object.keys(row)[j].includes('minor') ? formatKes(val) : String(val ?? '—')}</td>)}</tr>)}</tbody></table></div>}
+    <div className="report-tabs">{REPORT_TYPES.map((t) => <button key={t.id} className={reportType === t.id ? 'report-tab active' : 'report-tab'} onClick={() => setReportType(t.id)}>{t.icon} {t.label}</button>)}</div>
+    {!loading && rows.length > 0 && <div className="kpi-row">{kpis.map((k) => <div className="metric-card" key={k.label}><div className={`metric-icon ${k.tone}`}>{k.icon}</div><div className="metric-copy"><span>{k.label}</span><strong>{k.value}</strong></div></div>)}</div>}
+    <section className="panel table-panel">
+      {loading ? <Loading /> : rows.length === 0 ? <Empty title="No data" text="No records for this report." /> : <div className="report-table-wrap"><table className="report-table"><thead><tr>{columns.map((c) => <th key={c.key} className={c.numeric ? 'numeric' : ''}>{c.label}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i}>{columns.map((c) => <td key={c.key} className={c.numeric ? 'numeric' : ''}>{c.render(row)}</td>)}</tr>)}</tbody></table></div>}
     </section>
   </>;
 }
 
 // === NOTIFICATIONS ===
-function NotificationsSection() {
+function NotificationsSection({ onRefresh }: { onRefresh: () => void }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -1636,9 +1930,13 @@ function NotificationsSection() {
       setLoading(false);
     })();
   }, []);
-  async function markRead(id: string) { await supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', id); setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read_at: new Date().toISOString() } : n)); }
+  async function markRead(id: string) {
+    await supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', id);
+    setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read_at: new Date().toISOString() } : n));
+    onRefresh();
+  }
   return <SectionPanel eyebrow="Alerts" title="Notifications">
-    {loading ? <Loading /> : notifications.length === 0 ? <Empty title="No notifications" text="You're all caught up." /> : <div className="data-table">{notifications.map((n) => <div className={`table-row ${n.read_at ? 'read' : 'unread'}`} key={n.id} onClick={() => void markRead(n.id)}><div className="job-icon"><Bell size={17} /></div><div><strong>{n.title}</strong><span>{n.message}</span></div><span className="table-muted">{formatDateTime(n.created_at)}</span>{!n.read_at && <span className="status bg-blue-50 text-blue-700">New</span>}</div>)}</div>}
+    {loading ? <Loading /> : notifications.length === 0 ? <Empty title="No notifications" text="You're all caught up." /> : <div className="data-table">{notifications.map((n) => <div className={`table-row ${n.read_at ? 'read' : 'unread'}`} key={n.id} onClick={() => { if (!n.read_at) void markRead(n.id); }}><div className="job-icon"><Bell size={17} /></div><div><strong>{n.title}</strong><span>{n.message}</span></div><span className="table-muted">{formatDateTime(n.created_at)}</span>{!n.read_at && <span className="status bg-blue-50 text-blue-700">New</span>}</div>)}</div>}
   </SectionPanel>;
 }
 
@@ -1932,13 +2230,20 @@ function TechnicianForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m
   </form></Modal>;
 }
 
-function PartForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string) => void }) {
-  const [sku, setSku] = useState(''); const [name, setName] = useState(''); const [category, setCategory] = useState('General'); const [brand, setBrand] = useState(''); const [supplierId, setSupplierId] = useState(''); const [suppliers, setSuppliers] = useState<Supplier[]>([]); const [costPrice, setCostPrice] = useState('0'); const [sellPrice, setSellPrice] = useState('0'); const [qty, setQty] = useState('0'); const [reorder, setReorder] = useState('0'); const [location, setLocation] = useState(''); const [busy, setBusy] = useState(false);
+function PartForm({ part, onClose, onSaved }: { part?: Part; onClose: () => void; onSaved: (m: string) => void }) {
+  const isEdit = !!part;
+  const [sku, setSku] = useState(part?.sku ?? ''); const [name, setName] = useState(part?.name ?? ''); const [category, setCategory] = useState(part?.category ?? 'General'); const [brand, setBrand] = useState(part?.brand ?? ''); const [supplierId, setSupplierId] = useState(part?.supplier_id ?? ''); const [suppliers, setSuppliers] = useState<Supplier[]>([]); const [costPrice, setCostPrice] = useState(part ? String(part.cost_price_minor / 100) : '0'); const [sellPrice, setSellPrice] = useState(part ? String(part.selling_price_minor / 100) : '0'); const [qty, setQty] = useState('0'); const [reorder, setReorder] = useState(part ? String(part.reorder_level) : '0'); const [location, setLocation] = useState(part?.location ?? ''); const [active, setActive] = useState(part?.active ?? true); const [busy, setBusy] = useState(false);
   useEffect(() => { supabase.from('suppliers').select('*').eq('status', 'ACTIVE').is('deleted_at', null).order('name').then(({ data }) => setSuppliers((data ?? []) as Supplier[])); }, []);
-  async function submit(e: FormEvent) { e.preventDefault(); setBusy(true); const { error: partError } = await supabase.from('parts').insert({ sku, name, category, brand: brand || null, supplier_id: supplierId || null, cost_price_minor: Math.round(parseFloat(costPrice) * 100), selling_price_minor: Math.round(parseFloat(sellPrice) * 100), quantity_on_hand: parseInt(qty), reorder_level: parseInt(reorder), location: location || null });
-    if (partError) { setBusy(false); onSaved('Unable to save part. Please try again.'); return; }
-    onSaved('Part added successfully.'); }
-  return <Modal title="Add part" onClose={onClose}><form onSubmit={submit} className="modal-form"><label>SKU<input value={sku} onChange={(e) => setSku(e.target.value)} required placeholder="e.g. BP-001" /></label><label>Part name<input value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Brake pads" /></label><div className="form-row"><label>Category<input value={category} onChange={(e) => setCategory(e.target.value)} /></label><label>Brand<input value={brand} onChange={(e) => setBrand(e.target.value)} /></label></div><label>Supplier<span className="optional">Optional</span><select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}><option value="">No supplier</option>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label><div className="form-row"><label>Cost price (KES)<input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} required min="0" step="0.01" /></label><label>Selling price (KES)<input type="number" value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} required min="0" step="0.01" /></label></div><div className="form-row"><label>Quantity on hand<input type="number" value={qty} onChange={(e) => setQty(e.target.value)} required min="0" /></label><label>Reorder level<input type="number" value={reorder} onChange={(e) => setReorder(e.target.value)} required min="0" /></label></div><label>Location/bin<input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Shelf A-3" /></label><button className="button primary wide" disabled={busy}>{busy ? 'Saving...' : 'Save part'} <ArrowUpRight size={16} /></button></form></Modal>;
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setBusy(true);
+    const payload = { sku, name, category, brand: brand || null, supplier_id: supplierId || null, cost_price_minor: Math.round(parseFloat(costPrice) * 100), selling_price_minor: Math.round(parseFloat(sellPrice) * 100), reorder_level: parseInt(reorder), location: location || null };
+    const { error: partError } = isEdit
+      ? await supabase.from('parts').update({ ...payload, active }).eq('id', part!.id)
+      : await supabase.from('parts').insert({ ...payload, quantity_on_hand: parseInt(qty) });
+    if (partError) { setBusy(false); onSaved(`Unable to ${isEdit ? 'update' : 'save'} part. Please try again.`); return; }
+    onSaved(isEdit ? 'Part updated successfully.' : 'Part added successfully.');
+  }
+  return <Modal title={isEdit ? 'Edit part' : 'Add part'} onClose={onClose}><form onSubmit={submit} className="modal-form"><label>SKU<input value={sku} onChange={(e) => setSku(e.target.value)} required placeholder="e.g. BP-001" /></label><label>Part name<input value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Brake pads" /></label><div className="form-row"><label>Category<input value={category} onChange={(e) => setCategory(e.target.value)} /></label><label>Brand<input value={brand} onChange={(e) => setBrand(e.target.value)} /></label></div><label>Supplier<span className="optional">Optional</span><select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}><option value="">No supplier</option>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label><div className="form-row"><label>Cost price (KES)<input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} required min="0" step="0.01" /></label><label>Selling price (KES)<input type="number" value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} required min="0" step="0.01" /></label></div><div className="form-row">{isEdit ? <label>Reorder level<input type="number" value={reorder} onChange={(e) => setReorder(e.target.value)} required min="0" /></label> : <><label>Quantity on hand<input type="number" value={qty} onChange={(e) => setQty(e.target.value)} required min="0" /></label><label>Reorder level<input type="number" value={reorder} onChange={(e) => setReorder(e.target.value)} required min="0" /></label></>}</div><label>Location/bin<input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Shelf A-3" /></label>{isEdit && <label>Active<span className="optional">Inactive parts are hidden from the parts list</span><select value={active ? '1' : '0'} onChange={(e) => setActive(e.target.value === '1')}><option value="1">Active</option><option value="0">Inactive</option></select></label>}{isEdit && <p className="muted" style={{ margin: 0 }}>Quantity on hand isn&apos;t edited here — use Receive stock or Adjust stock so the movement ledger stays accurate.</p>}<button className="button primary wide" disabled={busy}>{busy ? 'Saving...' : isEdit ? 'Save changes' : 'Save part'} <ArrowUpRight size={16} /></button></form></Modal>;
 }
 
 function SupplierForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string) => void }) {
@@ -2017,11 +2322,67 @@ function StockReceiveForm({ onClose, onSaved }: { onClose: () => void; onSaved: 
   return <Modal title="Receive stock" onClose={onClose}><form onSubmit={submit} className="modal-form"><label>Part<select value={partId} onChange={(e) => setPartId(e.target.value)} required><option value="">Select part...</option>{parts.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.quantity_on_hand} in stock)</option>)}</select></label><div className="form-row"><label>Quantity<input type="number" value={qty} onChange={(e) => setQty(e.target.value)} required min="1" /></label><label>Unit cost (KES)<input type="number" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} required min="0" step="0.01" /></label></div><button className="button primary wide" disabled={busy || !partId}>{busy ? 'Receiving...' : 'Receive stock'} <ArrowUpRight size={16} /></button></form></Modal>;
 }
 
-function StockAdjustForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string) => void }) {
-  const [partId, setPartId] = useState(''); const [adjType, setAdjType] = useState<'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE'>('ADJUSTMENT_IN'); const [qty, setQty] = useState('1'); const [reason, setReason] = useState(''); const [parts, setParts] = useState<Part[]>([]); const [busy, setBusy] = useState(false);
+type AdjustmentReasonMeta =
+  | { value: string; kind: 'redirect'; hint: string; target: 'receive' | 'sales' | 'jobcards' }
+  | { value: string; kind: 'fixed'; direction: 'IN' | 'OUT'; movementType: 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE' }
+  | { value: string; kind: 'choice' }
+  | { value: string; kind: 'count' };
+
+const ADJUSTMENT_REASONS: AdjustmentReasonMeta[] = [
+  { value: 'Purchase/GRN', kind: 'redirect', target: 'receive', hint: 'Goods received against a purchase order — use "Receive stock" instead so it stays linked to the PO.' },
+  { value: 'Sale', kind: 'redirect', target: 'sales', hint: 'Record this from the Sales module so revenue, receipts and reports stay accurate.' },
+  { value: 'Workshop issue', kind: 'redirect', target: 'jobcards', hint: 'Issue parts to a work order from that job card so labour and billing stay linked.' },
+  { value: 'Customer return', kind: 'fixed', direction: 'IN', movementType: 'ADJUSTMENT_IN' },
+  { value: 'Supplier return', kind: 'fixed', direction: 'OUT', movementType: 'ADJUSTMENT_OUT' },
+  { value: 'Stock adjustment', kind: 'choice' },
+  { value: 'Damaged item', kind: 'fixed', direction: 'OUT', movementType: 'DAMAGE' },
+  { value: 'Lost item', kind: 'fixed', direction: 'OUT', movementType: 'ADJUSTMENT_OUT' },
+  { value: 'Stock count', kind: 'count' },
+];
+
+function StockAdjustForm({ onClose, onSaved, onGoToReceive, onGoToSales, onGoToWorkOrders }: { onClose: () => void; onSaved: (m: string) => void; onGoToReceive: () => void; onGoToSales: () => void; onGoToWorkOrders: () => void }) {
+  const [partId, setPartId] = useState(''); const [reason, setReason] = useState('Customer return'); const [direction, setDirection] = useState<'IN' | 'OUT'>('IN'); const [qty, setQty] = useState('1'); const [countedQty, setCountedQty] = useState(''); const [detail, setDetail] = useState(''); const [parts, setParts] = useState<Part[]>([]); const [busy, setBusy] = useState(false);
   useEffect(() => { supabase.from('parts').select('*').eq('active', true).order('name').limit(200).then(({ data }) => setParts((data ?? []) as Part[])); }, []);
-  async function submit(e: FormEvent) { e.preventDefault(); setBusy(true); const { error } = await supabase.rpc('adjust_stock', { p_part_id: partId, p_adjustment_type: adjType, p_quantity: parseInt(qty), p_reason: reason }); setBusy(false); onSaved(error ? 'Unable to adjust stock.' : 'Stock adjusted successfully.'); }
-  return <Modal title="Adjust stock" onClose={onClose}><form onSubmit={submit} className="modal-form"><label>Part<select value={partId} onChange={(e) => setPartId(e.target.value)} required><option value="">Select part...</option>{parts.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.quantity_on_hand} in stock)</option>)}</select></label><label>Adjustment type<select value={adjType} onChange={(e) => setAdjType(e.target.value as 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE')}><option value="ADJUSTMENT_IN">Add (in)</option><option value="ADJUSTMENT_OUT">Remove (out)</option><option value="DAMAGE">Damage/loss</option></select></label><label>Quantity<input type="number" value={qty} onChange={(e) => setQty(e.target.value)} required min="1" /></label><label>Reason<input value={reason} onChange={(e) => setReason(e.target.value)} required placeholder="e.g. Stock count correction" /></label><button className="button primary wide" disabled={busy || !partId}>{busy ? 'Adjusting...' : 'Adjust stock'} <ArrowUpRight size={16} /></button></form></Modal>;
+  const selectedPart = parts.find((p) => p.id === partId);
+  const meta = ADJUSTMENT_REASONS.find((r) => r.value === reason)!;
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (meta.kind === 'redirect') return;
+    let adjType: 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE';
+    let quantity: number;
+    if (meta.kind === 'count') {
+      const onHand = selectedPart?.quantity_on_hand ?? 0;
+      const delta = parseInt(countedQty || '0') - onHand;
+      if (delta === 0) { onSaved('No difference between the counted and recorded quantity — nothing to adjust.'); return; }
+      adjType = delta > 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
+      quantity = Math.abs(delta);
+    } else if (meta.kind === 'fixed') {
+      adjType = meta.movementType;
+      quantity = parseInt(qty);
+    } else {
+      adjType = direction === 'IN' ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
+      quantity = parseInt(qty);
+    }
+    setBusy(true);
+    const reasonText = detail.trim() ? `${reason} — ${detail.trim()}` : reason;
+    const { error } = await supabase.rpc('adjust_stock', { p_part_id: partId, p_adjustment_type: adjType, p_quantity: quantity, p_reason: reasonText });
+    setBusy(false);
+    onSaved(error ? 'Unable to adjust stock.' : 'Stock adjusted successfully.');
+  }
+
+  return <Modal title="Adjust stock" onClose={onClose}><form onSubmit={submit} className="modal-form">
+    <label>Part<select value={partId} onChange={(e) => setPartId(e.target.value)} required><option value="">Select part...</option>{parts.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.quantity_on_hand} in stock)</option>)}</select></label>
+    <label>Reason<select value={reason} onChange={(e) => setReason(e.target.value)}>{ADJUSTMENT_REASONS.map((r) => <option key={r.value} value={r.value}>{r.value}</option>)}</select></label>
+    {meta.kind === 'redirect' && <div className="form-error">{meta.hint}<button type="button" className="text-button" style={{ marginTop: 8 }} onClick={meta.target === 'receive' ? onGoToReceive : meta.target === 'sales' ? onGoToSales : onGoToWorkOrders}>{meta.target === 'receive' ? 'Go to Receive stock' : meta.target === 'sales' ? 'Go to Sales' : 'Go to Work Orders'} <ArrowUpRight size={14} /></button></div>}
+    {meta.kind === 'fixed' && <p className="muted" style={{ margin: 0 }}>{meta.direction === 'IN' ? 'This adds units back into stock.' : 'This removes units from stock.'}</p>}
+    {meta.kind === 'choice' && <label>Direction<select value={direction} onChange={(e) => setDirection(e.target.value as 'IN' | 'OUT')}><option value="IN">Add to stock</option><option value="OUT">Remove from stock</option></select></label>}
+    {meta.kind === 'count'
+      ? <div className="form-row"><label>Recorded on hand<input value={selectedPart?.quantity_on_hand ?? 0} disabled /></label><label>Counted quantity<input type="number" value={countedQty} onChange={(e) => setCountedQty(e.target.value)} required min="0" /></label></div>
+      : meta.kind !== 'redirect' && <label>Quantity<input type="number" value={qty} onChange={(e) => setQty(e.target.value)} required min="1" /></label>}
+    {meta.kind !== 'redirect' && <label>Additional detail <span className="optional">Optional</span><input value={detail} onChange={(e) => setDetail(e.target.value)} placeholder="e.g. supplier credit note number" /></label>}
+    <button className="button primary wide" disabled={busy || !partId || meta.kind === 'redirect'}>{busy ? 'Adjusting...' : 'Adjust stock'} <ArrowUpRight size={16} /></button>
+  </form></Modal>;
 }
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
