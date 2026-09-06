@@ -97,4 +97,31 @@ describe('transition_job_status', () => {
     const { count: firstCount } = await admin.from('sales').select('id', { count: 'exact', head: true }).eq('job_card_id', job.id);
     expect(firstCount).toBe(1);
   });
+
+  it('creates one separate sale per distinct part when a job card uses more than one', async () => {
+    const admin = adminClient();
+    const { customer, vehicle } = await seedCustomerAndVehicle(admin);
+    const job = await seedJobCard(admin, customer.id, vehicle.id);
+    const { client: staff } = await createStaffUser('ADMIN', 'admin-transitions-3');
+
+    const { data: partA } = await admin.from('parts').insert({ sku: `TEST3A-${job.id.slice(0, 8)}`, name: 'Brake Pad', category: 'Other', selling_price_minor: 1000, cost_price_minor: 500, quantity_on_hand: 10, reorder_level: 1 }).select().single();
+    const { data: partB } = await admin.from('parts').insert({ sku: `TEST3B-${job.id.slice(0, 8)}`, name: 'Oil Filter', category: 'Other', selling_price_minor: 700, cost_price_minor: 300, quantity_on_hand: 10, reorder_level: 1 }).select().single();
+    await staff.rpc('add_job_card_part', { p_job_card_id: job.id, p_part_id: partA.id, p_quantity: 2 });
+    await staff.rpc('add_job_card_part', { p_job_card_id: job.id, p_part_id: partB.id, p_quantity: 1 });
+    await staff.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: 'OPEN', p_reason: null });
+    await staff.rpc('transition_job_status', { p_job_card_id: job.id, p_new_status: 'IN_PROGRESS', p_reason: null });
+
+    const { data: sales } = await admin.from('sales').select('*, sale_items(*)').eq('job_card_id', job.id).order('total_minor', { ascending: false });
+    expect(sales).toHaveLength(2);
+    expect(sales?.every((s) => s.job_card_id === job.id)).toBe(true);
+    expect(new Set(sales?.map((s) => s.sale_number)).size).toBe(2); // distinct sale numbers
+
+    const brakePadSale = sales?.find((s) => s.sale_items[0].part_id === partA.id);
+    expect(brakePadSale?.total_minor).toBe(2000);
+    expect(brakePadSale?.sale_items).toHaveLength(1);
+
+    const oilFilterSale = sales?.find((s) => s.sale_items[0].part_id === partB.id);
+    expect(oilFilterSale?.total_minor).toBe(700);
+    expect(oilFilterSale?.sale_items).toHaveLength(1);
+  });
 });

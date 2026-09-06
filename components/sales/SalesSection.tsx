@@ -84,7 +84,8 @@ export default function SalesSection({ query, onNew, onSelect, can }: { query: s
   function exportCSV() {
     downloadCSV(`Oakland_Sales_${new Date().toISOString().slice(0, 10)}.csv`, filteredSales.map((s) => ({
       Date: formatDateTime(s.sale_date),
-      'Receipt / Work Order': s.job_cards?.job_number ?? s.sale_number,
+      'Sales ID': s.sale_number,
+      'Work Order No.': s.job_cards?.job_number ?? '',
       Customer: CUSTOMER_TYPE_LABELS[s.customer_type] ?? s.customer_type,
       Product: s.sale_items.map((it) => it.part_name).join('; '),
       Quantity: totalQuantity(s.sale_items),
@@ -122,7 +123,8 @@ export default function SalesSection({ query, onNew, onSelect, can }: { query: s
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>Receipt / Work Order No.</th>
+                  <th>Sales ID</th>
+                  <th>Work Order No.</th>
                   <th>Customer</th>
                   <th>Product</th>
                   <th className="numeric">Quantity</th>
@@ -136,7 +138,8 @@ export default function SalesSection({ query, onNew, onSelect, can }: { query: s
                 {filteredSales.map((s) => (
                   <tr key={s.id} className="clickable" onClick={() => onSelect(s.id)}>
                     <td>{formatDateTime(s.sale_date)}</td>
-                    <td>{s.job_cards?.job_number ?? s.sale_number}</td>
+                    <td>{s.sale_number}</td>
+                    <td>{s.job_cards?.job_number ?? '—'}</td>
                     <td>{CUSTOMER_TYPE_LABELS[s.customer_type] ?? s.customer_type.replaceAll('_', ' ')}</td>
                     <td>{productSummary(s.sale_items)}</td>
                     <td className="numeric">{totalQuantity(s.sale_items)}</td>
@@ -177,7 +180,8 @@ function SalesPrintView({ sales, filterLabel, onClose }: { sales: SaleRow[]; fil
           <thead>
             <tr>
               <th>Date</th>
-              <th>Receipt / Work Order</th>
+              <th>Sales ID</th>
+              <th>Work Order No.</th>
               <th>Customer</th>
               <th>Product</th>
               <th>Qty</th>
@@ -190,7 +194,8 @@ function SalesPrintView({ sales, filterLabel, onClose }: { sales: SaleRow[]; fil
             {sales.map((s) => (
               <tr key={s.id}>
                 <td>{formatDateTime(s.sale_date)}</td>
-                <td>{s.job_cards?.job_number ?? s.sale_number}</td>
+                <td>{s.sale_number}</td>
+                <td>{s.job_cards?.job_number ?? '—'}</td>
                 <td>{CUSTOMER_TYPE_LABELS[s.customer_type] ?? s.customer_type.replaceAll('_', ' ')}</td>
                 <td>{s.sale_items.map((it) => it.part_name).join(', ') || '—'}</td>
                 <td>{totalQuantity(s.sale_items)}</td>

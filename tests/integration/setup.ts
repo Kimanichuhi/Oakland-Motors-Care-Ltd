@@ -77,11 +77,11 @@ export async function seedPart(admin: SupabaseClient, quantityOnHand: number) {
   return part;
 }
 
-export async function seedInvoice(admin: SupabaseClient, customerId: string, totalMinor: number) {
+export async function seedInvoice(admin: SupabaseClient, customerId: string, totalMinor: number, jobCardId?: string) {
   const invoiceNumber = `INV-TEST-${Date.now()}-${Math.floor(Math.random() * 9999)}`;
   const { data: invoice, error } = await admin
     .from('invoices')
-    .insert({ invoice_number: invoiceNumber, customer_id: customerId, subtotal_minor: totalMinor, total_minor: totalMinor, status: 'ISSUED' })
+    .insert({ invoice_number: invoiceNumber, customer_id: customerId, job_card_id: jobCardId ?? null, subtotal_minor: totalMinor, total_minor: totalMinor, status: 'ISSUED' })
     .select()
     .single();
   if (error || !invoice) throw new Error(`Failed to seed invoice: ${error?.message}`);

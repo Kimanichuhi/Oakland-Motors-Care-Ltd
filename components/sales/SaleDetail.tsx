@@ -7,7 +7,7 @@ import { ShoppingCart, ChevronRight, User, Phone, CreditCard, CircleDollarSign, 
 
 type SaleWithItems = Sale & { sale_items: SaleItem[]; job_cards: { job_number: string } | null };
 
-export default function SaleDetail({ id, onBack, onRefresh, onNotice, can }: { id: string; onBack: () => void; onRefresh?: () => void; onNotice?: (m: string) => void; can: (p: string) => boolean }) {
+export default function SaleDetail({ id, onBack, onNotice, can }: { id: string; onBack: () => void; onNotice?: (m: string) => void; can: (p: string) => boolean }) {
   const [sale, setSale] = useState<SaleWithItems | null>(null);
   const [loading, setLoading] = useState(true);
   const [voiding, setVoiding] = useState(false);
@@ -32,7 +32,6 @@ export default function SaleDetail({ id, onBack, onRefresh, onNotice, can }: { i
     setVoiding(false);
     if (error) { onNotice?.(error.message ?? 'Unable to void this sale.'); return; }
     onNotice?.('Sale voided and stock restored.');
-    onRefresh?.();
     void load();
   }
 

@@ -14,6 +14,15 @@ type StatusFilter = 'all' | 'inside' | 'departed';
 type SortColumn = 'date' | 'time_in' | 'time_out' | 'registration_number' | 'make_model';
 const PAGE_SIZE = 25;
 
+function vehicleDuration(timeIn: string, timeOut: string | null): string | null {
+  if (!timeOut) return null;
+  const [h1, m1] = timeIn.split(':').map(Number);
+  const [h2, m2] = timeOut.split(':').map(Number);
+  let mins = (h2 * 60 + m2) - (h1 * 60 + m1);
+  if (mins < 0) mins += 24 * 60;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
 function dateRangeFor(preset: DatePreset, customFrom: string, customTo: string): { from: string; to: string } {
   const now = new Date();
   if (preset === 'today') { const s = localDateStr(now); return { from: s, to: s }; }
@@ -160,33 +169,40 @@ export default function VehicleRegisterSection({ can, onNotice }: { can: (p: str
       {loading ? <div className="empty"><strong>Loading…</strong></div> : rows.length === 0 ? (
         <div className="empty"><ClipboardList size={18} /><strong>No vehicles registered {datePreset === 'today' ? 'today' : 'for this period'}</strong><span>Start by clicking &quot;Register Vehicle&quot;.</span></div>
       ) : (
-        <div className="panel">
-          <div className="data-table">
-            <div className="table-row" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.05em', color: '#8997a5', fontWeight: 800 }}>
-              <button className="sortable-th" onClick={() => toggleSort('date')}>Date <ArrowUpDown size={11} /></button>
-              <button className="sortable-th" onClick={() => toggleSort('registration_number')}>Reg. No. <ArrowUpDown size={11} /></button>
-              <button className="sortable-th" onClick={() => toggleSort('make_model')}>Make / Model <ArrowUpDown size={11} /></button>
-              <button className="sortable-th" onClick={() => toggleSort('time_in')}>Time In <ArrowUpDown size={11} /></button>
-              <button className="sortable-th" onClick={() => toggleSort('time_out')}>Time Out <ArrowUpDown size={11} /></button>
-              <span>Action</span>
-            </div>
-            {rows.map((r) => (
-              <div className="table-row" key={r.id}>
-                <div><strong>{formatDate(r.date)}</strong></div>
-                <button className="text-button" onClick={() => setHistoryReg(r.registration_number)}>{r.registration_number}</button>
-                <span className="table-muted">{r.make_model}</span>
-                <span className="table-muted">{formatTime(r.time_in)}</span>
-                <span className="table-muted">{r.time_out ? formatTime(r.time_out) : '—'}</span>
-                <div className="action-buttons">
-                  {!r.time_out && (can('vehicle_register.record') || can('vehicle_register.manage')) && (
-                    <button className="button secondary small" onClick={() => setTimeOutEntry(r)}><LogOut size={13} /> Time Out</button>
-                  )}
-                  {can('vehicle_register.manage') && (
-                    <button className="button secondary small" onClick={() => setEditEntry(r)}><Pencil size={13} /> Edit</button>
-                  )}
-                </div>
-              </div>
-            ))}
+        <div className="panel table-panel">
+          <div className="report-table-wrap">
+            <table className="report-table">
+              <thead><tr>
+                <th><button className="sortable-th" onClick={() => toggleSort('date')}>Date <ArrowUpDown size={11} /></button></th>
+                <th><button className="sortable-th" onClick={() => toggleSort('registration_number')}>Reg. No. <ArrowUpDown size={11} /></button></th>
+                <th><button className="sortable-th" onClick={() => toggleSort('make_model')}>Make / Model <ArrowUpDown size={11} /></button></th>
+                <th><button className="sortable-th" onClick={() => toggleSort('time_in')}>Time In <ArrowUpDown size={11} /></button></th>
+                <th><button className="sortable-th" onClick={() => toggleSort('time_out')}>Time Out <ArrowUpDown size={11} /></button></th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr></thead>
+              <tbody>{rows.map((r) => {
+                const duration = vehicleDuration(r.time_in, r.time_out);
+                return <tr key={r.id}>
+                  <td><strong>{formatDate(r.date)}</strong></td>
+                  <td><button className="text-button" style={{ padding: 0 }} onClick={() => setHistoryReg(r.registration_number)}>{r.registration_number}</button></td>
+                  <td>{r.make_model}</td>
+                  <td>{formatTime(r.time_in)}</td>
+                  <td>{r.time_out ? formatTime(r.time_out) : '—'}</td>
+                  <td>{r.time_out
+                    ? <><span className="status bg-slate-100 text-slate-600">Departed</span>{duration && <span className="table-subtext">{duration}</span>}</>
+                    : <span className="status bg-emerald-50 text-emerald-700">Inside</span>}</td>
+                  <td><div className="action-buttons">
+                    {!r.time_out && (can('vehicle_register.record') || can('vehicle_register.manage')) && (
+                      <button className="button secondary small" onClick={() => setTimeOutEntry(r)}><LogOut size={13} /> Time Out</button>
+                    )}
+                    {can('vehicle_register.manage') && (
+                      <button className="button secondary small" onClick={() => setEditEntry(r)}><Pencil size={13} /> Edit</button>
+                    )}
+                  </div></td>
+                </tr>;
+              })}</tbody>
+            </table>
           </div>
           <div className="status-row" style={{ marginTop: 4 }}>
             <span className="muted">Showing {rows.length === 0 ? 0 : page * PAGE_SIZE + 1}–{page * PAGE_SIZE + rows.length} of {totalCount}</span>
