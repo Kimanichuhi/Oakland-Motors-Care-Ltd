@@ -26,6 +26,18 @@ export function localTimeStr(d: Date = new Date()): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+// Oakland Motor Care Ltd operates in Nairobi (Africa/Nairobi, UTC+3, no DST — always +03:00).
+// A bare "YYYY-MM-DDTHH:MM:SS" sent to Postgres is interpreted in the DB server's own
+// timezone (UTC on Supabase), not the browser's, so a day-boundary query needs this
+// explicit offset to mean the same "local midnight" the browser's Date object computed.
+const EAT_OFFSET = '+03:00';
+export function localDayStart(d: Date = new Date()): string {
+  return `${localDateStr(d)}T00:00:00${EAT_OFFSET}`;
+}
+export function localDayEnd(d: Date = new Date()): string {
+  return `${localDateStr(d)}T23:59:59.999${EAT_OFFSET}`;
+}
+
 export function addDaysLocal(dateStr: string, days: number): string {
   const [y, m, d] = dateStr.split('-').map(Number);
   const dt = new Date(y, m - 1, d);

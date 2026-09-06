@@ -3,7 +3,8 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toPng } from 'html-to-image';
 import { supabase } from '@/lib/supabase';
-import { formatKes, formatDate, formatDateTime, computeLineTotal, downloadCSV, formatKg } from '@/lib/formatting';
+import { formatKes, formatDate, formatDateTime, computeLineTotal, downloadCSV, formatKg, localDateStr, localDayStart, localDayEnd } from '@/lib/formatting';
+import { getTaxRate, clearTaxRateCache } from '@/lib/settings';
 import { statusStyles, JOB_TRANSITIONS, PAYMENT_METHODS, SALES_PAYMENT_METHODS, SALES_PAYMENT_STATUSES, CUSTOMER_SALE_TYPES, PART_CATEGORIES, JOB_TYPE_META, MOVEMENT_TYPES } from '@/lib/constants';
 import { loadUserPermissions, hasPermission, clearPermissionCache, type UserPermission } from '@/lib/permissions';
 import type { Customer, Vehicle, Service, Part, Supplier, JobCard, JobCardLabour, JobCardPart, JobCardStatusHistory, JobCardInspectionItem, JobCardWorkItem, JobCardDiagnosis, JobCardQualityCheck, JobCardSignoff, Invoice, InvoiceItem, Payment, Quotation, QuotationItem, PurchaseOrder, PurchaseOrderItem, StockMovement, Sale, SaleItem, Employee, Notification, AuditLog, BusinessSettings, Role, Permission, Profile } from '@/lib/types';
@@ -280,6 +281,7 @@ export default function Home() {
           <div><strong className="truncate">{userPerms.fullName || 'User'}</strong><span>{userPerms.roleLabel}</span></div>
           <button aria-label="Sign out" onClick={() => void signOut()}><LogOut size={16} /></button>
         </div>
+        <PoweredByFooter className="sidebar" />
       </div>
     </aside>
     <section className="content-area">
@@ -515,7 +517,7 @@ function AuthScreen({ error, setError }: { error: string; setError: (v: string) 
     </div></div></div>;
   }
 
-  return <div className="auth-layout"><div className="auth-panel"><div className="auth-card"><img src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" /><h2>Welcome back</h2><p className="muted">Sign in to continue.</p><form onSubmit={submit}><label>Work email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@oaklandmotorcare.co.ke" required /></label><label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" minLength={6} required /></label>{error && <div className="form-error">{error}</div>}<button className="button primary wide" disabled={busy}>{busy ? 'Please wait...' : 'Sign in'} <ArrowUpRight size={17} /></button><button className="switch-auth" type="button" onClick={() => { setMode('forgot'); setError(''); }}>Forgot password?</button></form></div></div></div>;
+  return <div className="auth-layout"><div className="auth-panel"><div className="auth-card"><img src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" /><h2>Welcome back</h2><p className="muted">Sign in to continue.</p><form onSubmit={submit}><label>Work email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@oaklandmotorcare.co.ke" required /></label><label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" minLength={6} required /></label>{error && <div className="form-error">{error}</div>}<button className="button primary wide" disabled={busy}>{busy ? 'Please wait...' : 'Sign in'} <ArrowUpRight size={17} /></button><button className="switch-auth" type="button" onClick={() => { setMode('forgot'); setError(''); }}>Forgot password?</button></form><PoweredByFooter /></div></div></div>;
 }
 
 function ResetPasswordScreen({ onDone }: { onDone: () => void }) {
@@ -586,7 +588,7 @@ function DashboardSection({ onNewJob, onNewCustomer, onNewSale, onReceiveStock, 
 
   useEffect(() => {
     (async () => {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = localDateStr();
       const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
       const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
       const [jobs, customers, vehicles, parts, invoices, quotations, weekVehicleRows, overdueInvoices] = await Promise.all([
@@ -602,7 +604,7 @@ function DashboardSection({ onNewJob, onNewCustomer, onNewSale, onReceiveStock, 
       const jobData = (jobs.data ?? []) as (JobCard & { vehicles: { registration_number: string } | null, customers: { full_name: string } | null })[];
       setRecentJobs(jobData.slice(0, 6));
       const active = jobData.filter((j) => !['COMPLETED','CANCELLED'].includes(j.status));
-      const completedToday = jobData.filter((j) => j.status === 'COMPLETED' && j.created_at.slice(0, 10) === today);
+      const completedToday = jobData.filter((j) => j.status === 'COMPLETED' && localDateStr(new Date(j.created_at)) === today);
       const lowStock = (parts.data ?? []).filter((p) => p.quantity_on_hand <= p.reorder_level);
       const outOfStock = (parts.data ?? []).filter((p) => p.quantity_on_hand === 0);
       const outstanding = (invoices.data ?? []).reduce((s, inv) => s + (inv.total_minor - inv.amount_paid_minor), 0);
@@ -612,11 +614,11 @@ function DashboardSection({ onNewJob, onNewCustomer, onNewSale, onReceiveStock, 
         .sort((a, b) => b.balance - a.balance);
       setWorstOverdue(overdueRows[0] ?? null);
       const [todaySales, weekSales, monthSales, recentSaleRows, saleItemRows] = await Promise.all([
-        supabase.from('sales').select('total_minor').gte('sale_date', `${today}T00:00:00`).neq('status', 'VOIDED'),
+        supabase.from('sales').select('total_minor').gte('sale_date', localDayStart()).neq('status', 'VOIDED'),
         supabase.from('sales').select('total_minor').gte('sale_date', weekAgo.toISOString()).neq('status', 'VOIDED'),
         supabase.from('sales').select('total_minor').gte('sale_date', monthStart.toISOString()).neq('status', 'VOIDED'),
         supabase.from('sales').select('*').order('sale_date', { ascending: false }).limit(5),
-        supabase.from('sale_items').select('part_name,category,quantity,sales!inner(status,created_at)').gte('sales.created_at', monthStart.toISOString()).neq('sales.status', 'VOIDED').limit(200),
+        supabase.from('sale_items').select('part_name,category,quantity,sales!inner(status,sale_date)').gte('sales.sale_date', monthStart.toISOString()).neq('sales.status', 'VOIDED').limit(200),
       ]);
       const itemTotals = new Map<string, { name: string; category: string | null; qty: number }>();
       for (const item of (saleItemRows.data ?? []) as { part_name: string; category: string | null; quantity: number }[]) {
@@ -640,8 +642,7 @@ function DashboardSection({ onNewJob, onNewCustomer, onNewSale, onReceiveStock, 
       const days: { day: string; amount: number }[] = [];
       for (let i = 6; i >= 0; i--) {
         const d = new Date(); d.setDate(d.getDate() - i);
-        const dayKey = d.toISOString().slice(0, 10);
-        const { data } = await supabase.from('sales').select('total_minor').gte('sale_date', `${dayKey}T00:00:00`).lt('sale_date', `${dayKey}T23:59:59`).neq('status', 'VOIDED');
+        const { data } = await supabase.from('sales').select('total_minor').gte('sale_date', localDayStart(d)).lt('sale_date', localDayEnd(d)).neq('status', 'VOIDED');
         days.push({ day: d.toLocaleDateString('en', { weekday: 'short' }), amount: ((data ?? []) as Sale[]).reduce((s, sale) => s + sale.total_minor, 0) });
       }
       setRevenueData(days);
@@ -800,6 +801,8 @@ function VehicleDetail({ id, onBack, onNewJob, can }: { id: string; onBack: () =
   const [vehicle, setVehicle] = useState<(Vehicle & { customers: Customer | null }) | null>(null);
   const [jobs, setJobs] = useState<(JobCard & { job_card_labour: JobCardLabour[]; job_card_parts: JobCardPart[]; job_card_diagnosis: JobCardDiagnosis[] })[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [taxRate, setTaxRate] = useState(16);
+  useEffect(() => { void getTaxRate().then(setTaxRate); }, []);
   useEffect(() => {
     (async () => {
       const [v, j, i] = await Promise.all([
@@ -828,7 +831,7 @@ function VehicleDetail({ id, onBack, onNewJob, can }: { id: string; onBack: () =
       <div className="panel-heading"><div><p className="eyebrow">Complete history</p><h3>Service timeline</h3></div></div>
       {jobs.length === 0 ? <Empty title="No service history" text="This vehicle has no work orders yet." /> : <div className="timeline">{jobs.map((job) => {
         const labourTotal = (job.job_card_labour ?? []).reduce((s, l) => s + computeLineTotal(l.quantity, l.unit_price_minor, l.tax_rate), 0);
-        const partsTotal = (job.job_card_parts ?? []).reduce((s, p) => s + computeLineTotal(p.quantity, p.unit_price_minor, 16), 0);
+        const partsTotal = (job.job_card_parts ?? []).reduce((s, p) => s + computeLineTotal(p.quantity, p.unit_price_minor, taxRate), 0);
         return <div className="timeline-item" key={job.id}>
           <div className={`timeline-dot ${TIMELINE_DOT_TONES[job.status] ?? ''}`} /><div className="timeline-content">
             <div className="timeline-header"><strong>{job.job_number}</strong><span className={`status ${statusStyles[job.status] ?? ''}`}>{job.status.replaceAll('_', ' ')}</span></div>
@@ -879,6 +882,7 @@ function JobsSection({ query, onNew, onSelect, onNotice, can }: { query: string;
 
   async function exportWorkOrdersCSV() {
     setExporting(true);
+    const taxRate = await getTaxRate();
     const { data, error } = await supabase
       .from('job_cards')
       .select('job_number,created_at,status,job_types,other_charges_minor,vehicles(registration_number,make,model),customers(full_name,phone),job_card_labour(quantity,unit_price_minor,tax_rate),job_card_parts(quantity,unit_price_minor),job_card_signoffs(role,name),invoices(total_minor,amount_paid_minor)')
@@ -891,7 +895,7 @@ function JobsSection({ query, onNew, onSelect, onNotice, can }: { query: string;
 
     downloadCSV(`Oakland_Work_Orders_${new Date().toISOString().slice(0, 10)}.csv`, rows.map((j) => {
       const labourTotal = (j.job_card_labour ?? []).reduce((s, l) => s + computeLineTotal(l.quantity, l.unit_price_minor, l.tax_rate), 0);
-      const partsTotal = (j.job_card_parts ?? []).reduce((s, p) => s + computeLineTotal(p.quantity, p.unit_price_minor, 16), 0);
+      const partsTotal = (j.job_card_parts ?? []).reduce((s, p) => s + computeLineTotal(p.quantity, p.unit_price_minor, taxRate), 0);
       const total = labourTotal + partsTotal + (j.other_charges_minor ?? 0);
       const amountPaid = j.invoices?.[0]?.amount_paid_minor ?? 0;
       return {
@@ -985,6 +989,8 @@ function JobDetail({ id, onBack, can, onNotice, onNewInvoice }: { id: string; on
   const [technicianName, setTechnicianName] = useState('');
   const [savingDetails, setSavingDetails] = useState(false);
   const [showPrint, setShowPrint] = useState(false);
+  const [taxRate, setTaxRate] = useState(16);
+  useEffect(() => { void getTaxRate().then(setTaxRate); }, []);
 
   useEffect(() => {
     (async () => {
@@ -1011,7 +1017,7 @@ function JobDetail({ id, onBack, can, onNotice, onNewInvoice }: { id: string; on
 
   async function addLabour(e: FormEvent) {
     e.preventDefault();
-    const { error } = await supabase.from('job_card_labour').insert({ job_card_id: id, description: labourDesc, unit_price_minor: Math.round(parseFloat(labourPrice) * 100) });
+    const { error } = await supabase.from('job_card_labour').insert({ job_card_id: id, description: labourDesc, unit_price_minor: Math.round(parseFloat(labourPrice) * 100), tax_rate: taxRate });
     if (error) { onNotice('Unable to add labour. Please try again.'); return; }
     setLabourDesc(''); setLabourPrice('0'); onNotice('Labour added.'); reload();
   }
@@ -1050,11 +1056,11 @@ function JobDetail({ id, onBack, can, onNotice, onNewInvoice }: { id: string; on
   if (!job) return <Loading />;
   const transitions = JOB_TRANSITIONS[job.status] ?? [];
   const labourTotal = (job.job_card_labour ?? []).reduce((s, l) => s + computeLineTotal(l.quantity, l.unit_price_minor, l.tax_rate), 0);
-  const partsTotal = (job.job_card_parts ?? []).reduce((s, p) => s + computeLineTotal(p.quantity, p.unit_price_minor, 16), 0);
+  const partsTotal = (job.job_card_parts ?? []).reduce((s, p) => s + computeLineTotal(p.quantity, p.unit_price_minor, taxRate), 0);
   const otherChargesMinor = Math.round((parseFloat(otherCharges) || 0) * 100);
   const total = labourTotal + partsTotal + otherChargesMinor;
   const technicianSignoff = job.job_card_signoffs.find((s) => s.role === 'TECHNICIAN');
-  const invoice = job.invoices?.[0];
+  const invoice = job.invoices?.find((inv) => inv.status !== 'VOID') ?? job.invoices?.[job.invoices.length - 1];
   const payments = invoice ? [...(invoice.payments ?? [])].sort((a, b) => b.paid_at.localeCompare(a.paid_at)) : [];
   const amountPaid = invoice?.amount_paid_minor ?? 0;
   const balance = Math.max(0, total - amountPaid);
@@ -1117,7 +1123,7 @@ function JobDetail({ id, onBack, can, onNotice, onNewInvoice }: { id: string; on
       {(job.job_card_parts ?? []).length === 0 ? <Empty title="No parts issued" text="Search inventory below to add a part." /> : <div className="data-table">{job.job_card_parts.map((p) => <div className="table-row" key={p.id}>
         <div><strong>{p.parts?.name ?? 'Part'}</strong><span>{p.parts?.sku} · {p.quantity} × {formatKes(p.unit_price_minor)}</span></div>
         <span className={`status ${p.issued_at ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{p.issued_at ? 'Issued' : 'Pending'}</span>
-        <span className="table-muted">{formatKes(computeLineTotal(p.quantity, p.unit_price_minor, 16))}</span>
+        <span className="table-muted">{formatKes(computeLineTotal(p.quantity, p.unit_price_minor, taxRate))}</span>
         {!p.issued_at && can('inventory.issue') && <button className="close-button" style={{ width: 28, height: 28 }} title="Remove" onClick={() => void removePart(p.id)}><X size={14} /></button>}
       </div>)}</div>}
       <JobCardPartAdder jobCardId={id} can={can} onAdded={(m) => { onNotice(m); reload(); }} />
@@ -1161,7 +1167,7 @@ function JobDetail({ id, onBack, can, onNotice, onNewInvoice }: { id: string; on
         {can('job.view') && <button className="button secondary small" onClick={() => setShowPrint(true)}><Printer size={16} /> Print work order</button>}
       </div>
     </section>
-    {showPrint && <JobCardPrintView job={job} labourTotal={labourTotal} partsTotal={partsTotal} onClose={() => setShowPrint(false)} onNotice={onNotice} />}
+    {showPrint && <JobCardPrintView job={job} labourTotal={labourTotal} partsTotal={partsTotal} taxRate={taxRate} onClose={() => setShowPrint(false)} onNotice={onNotice} />}
   </>;
 }
 
@@ -1343,7 +1349,7 @@ function JobCardPartAdder({ jobCardId, can, onAdded }: { jobCardId: string; can:
 
 
 // === JOB CARD PRINT / PDF VIEW — matches the physical duplicate Work Order pad ===
-function JobCardPrintView({ job, labourTotal, partsTotal, onClose, onNotice }: { job: JobDetailData; labourTotal: number; partsTotal: number; onClose: () => void; onNotice: (m: string) => void }) {
+function JobCardPrintView({ job, labourTotal, partsTotal, taxRate, onClose, onNotice }: { job: JobDetailData; labourTotal: number; partsTotal: number; taxRate: number; onClose: () => void; onNotice: (m: string) => void }) {
   const [blank, setBlank] = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -1390,18 +1396,18 @@ function JobCardPrintView({ job, labourTotal, partsTotal, onClose, onNotice }: {
     </div>
 
     <div id="print-area" className="print-sheet work-order-sheet">
-      <WorkOrderCopy job={job} labourTotal={labourTotal} partsTotal={partsTotal} blank={blank} />
+      <WorkOrderCopy job={job} labourTotal={labourTotal} partsTotal={partsTotal} taxRate={taxRate} blank={blank} />
     </div>
   </div>;
 }
 
-function WorkOrderCopy({ job, labourTotal, partsTotal, blank }: { job: JobDetailData; labourTotal: number; partsTotal: number; blank: boolean }) {
+function WorkOrderCopy({ job, labourTotal, partsTotal, taxRate, blank }: { job: JobDetailData; labourTotal: number; partsTotal: number; taxRate: number; blank: boolean }) {
   const technicianName = job.job_card_signoffs.find((s) => s.role === 'TECHNICIAN')?.name;
   const jobDone = job.job_card_work_items?.filter((w) => w.status === 'COMPLETED').map((w) => w.description).join('; ') || job.recommended_work || '';
   const payments = !blank ? job.invoices.flatMap((inv) => inv.payments ?? []).sort((a, b) => b.paid_at.localeCompare(a.paid_at)) : [];
   const lastPayment = payments[0];
   const mpesaPayment = payments.find((p) => p.method === 'MPESA');
-  const amountPaid = blank ? 0 : (job.invoices?.[0]?.amount_paid_minor ?? 0);
+  const amountPaid = blank ? 0 : job.invoices.reduce((s, inv) => s + inv.amount_paid_minor, 0);
   const totalCharges = labourTotal + partsTotal + job.other_charges_minor;
   const balanceDue = Math.max(0, totalCharges - amountPaid);
   const plainKes = (minor: number) => (minor / 100).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1448,7 +1454,7 @@ function WorkOrderCopy({ job, labourTotal, partsTotal, blank }: { job: JobDetail
           <tbody>
             {rows.map((_, i) => {
               const p = partRows[i];
-              const total = p ? computeLineTotal(p.quantity, p.unit_price_minor, 16) : 0;
+              const total = p ? computeLineTotal(p.quantity, p.unit_price_minor, taxRate) : 0;
               return <tr key={i}>
                 <td>{i + 1}</td>
                 <td>{p?.parts?.name ?? ''}</td>
@@ -1520,7 +1526,10 @@ function TechniciansSection({ onNew, can }: { onNew: () => void; can: (p: string
       setEmployees(empList);
       const counts: Record<string, number> = {};
       for (const emp of empList) {
-        if (emp.user_id) { const { count } = await supabase.from('job_card_assignments').select('id', { count: 'exact', head: true }).eq('technician_id', emp.user_id).is('completed_at', null); counts[emp.id] = count ?? 0; }
+        // Technician assignment is recorded as a job_card_signoffs row (name-matched, not a
+        // foreign key) via JobDetail's "Assign" action — job_card_assignments is never written to.
+        const { count } = await supabase.from('job_card_signoffs').select('job_card_id, job_cards!inner(status)', { count: 'exact', head: true }).eq('role', 'TECHNICIAN').eq('name', emp.full_name).not('job_cards.status', 'in', '(COMPLETED,CANCELLED)');
+        counts[emp.id] = count ?? 0;
       }
       setAssignments(counts); setLoading(false);
     })();
@@ -1561,7 +1570,7 @@ function PartsSection({ onNew, onReceive, onAdjust, onSelect, can }: { onNew: ()
   useEffect(() => {
     (async () => {
       const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      const { data } = await supabase.from('sale_items').select('part_id,quantity,sales!inner(status,created_at)').gte('sales.created_at', thirtyDaysAgo.toISOString()).neq('sales.status', 'VOIDED').limit(2000);
+      const { data } = await supabase.from('sale_items').select('part_id,quantity,sales!inner(status,sale_date)').gte('sales.sale_date', thirtyDaysAgo.toISOString()).neq('sales.status', 'VOIDED').limit(2000);
       const map: Record<string, number> = {};
       for (const row of (data ?? []) as unknown as { part_id: string; quantity: number }[]) map[row.part_id] = (map[row.part_id] ?? 0) + row.quantity;
       setPerformance(map);
@@ -1967,15 +1976,17 @@ function ProcurementSection({ onNew, onSelect, can }: { onNew: () => void; onSel
 function PODetail({ id, onBack, can, onNotice }: { id: string; onBack: () => void; can: (p: string) => boolean; onNotice: (m: string) => void }) {
   const [po, setPO] = useState<(PurchaseOrder & { suppliers: Supplier | null; purchase_order_items: (PurchaseOrderItem & { parts: Part | null })[] }) | null>(null);
   const [receiveQty, setReceiveQty] = useState<Record<string, string>>({});
+  const [receivingId, setReceivingId] = useState<string | null>(null);
   useEffect(() => { supabase.from('purchase_orders').select('*, suppliers(*), purchase_order_items(*, parts(*))').eq('id', id).maybeSingle().then(({ data }) => setPO(data as (PurchaseOrder & { suppliers: Supplier | null; purchase_order_items: (PurchaseOrderItem & { parts: Part | null })[] }) | null)); }, [id]);
 
-  async function receiveGoods(itemId: string, partId: string, unitCost: number) {
+  async function receiveGoods(itemId: string, unitCost: number) {
     const qty = parseInt(receiveQty[itemId] ?? '0');
-    if (qty <= 0) return;
-    const { error } = await supabase.rpc('receive_stock', { p_part_id: partId, p_quantity: qty, p_unit_cost_minor: unitCost, p_reference: po?.po_number ?? 'PO', p_reference_id: id });
-    if (error) { onNotice('Unable to receive goods. Please try again.'); return; }
-    await supabase.from('goods_receipts').insert({ purchase_order_id: id, part_id: partId, quantity_received: qty, unit_cost_minor: unitCost });
-    await supabase.from('purchase_order_items').update({ quantity_received: (po?.purchase_order_items.find((i) => i.id === itemId)?.quantity_received ?? 0) + qty }).eq('id', itemId);
+    if (qty <= 0 || receivingId) return;
+    setReceivingId(itemId);
+    const { error } = await supabase.rpc('receive_po_item', { p_item_id: itemId, p_quantity: qty, p_unit_cost_minor: unitCost });
+    setReceivingId(null);
+    if (error) { onNotice(error.message.includes('more than the ordered') ? 'Cannot receive more than the ordered quantity.' : 'Unable to receive goods. Please try again.'); return; }
+    setReceiveQty((prev) => ({ ...prev, [itemId]: '' }));
     onNotice(`${qty} units received into inventory.`); reload();
   }
 
@@ -1995,7 +2006,7 @@ function PODetail({ id, onBack, can, onNotice }: { id: string; onBack: () => voi
         <div className="job-icon"><Package size={17} /></div>
         <div><strong>{item.parts?.name ?? 'Part'}</strong><span>Ordered: {item.quantity_ordered} · Received: {item.quantity_received}</span></div>
         <span className="table-muted">{formatKes(item.unit_cost_minor)} each</span>
-        {can('inventory.receive') && item.quantity_received < item.quantity_ordered && <div className="receive-row"><input type="number" min="1" max={item.quantity_ordered - item.quantity_received} placeholder="Qty" value={receiveQty[item.id] ?? ''} onChange={(e) => setReceiveQty({ ...receiveQty, [item.id]: e.target.value })} /><button className="button primary small" onClick={() => void receiveGoods(item.id, item.part_id, item.unit_cost_minor)}>Receive</button></div>}
+        {can('inventory.receive') && item.quantity_received < item.quantity_ordered && <div className="receive-row"><input type="number" min="1" max={item.quantity_ordered - item.quantity_received} placeholder="Qty" value={receiveQty[item.id] ?? ''} onChange={(e) => setReceiveQty({ ...receiveQty, [item.id]: e.target.value })} disabled={receivingId === item.id} /><button className="button primary small" disabled={receivingId === item.id} onClick={() => void receiveGoods(item.id, item.unit_cost_minor)}>{receivingId === item.id ? 'Receiving...' : 'Receive'}</button></div>}
       </div>)}</div>}
     </section>
   </>;
@@ -2028,9 +2039,12 @@ function QuotationDetail({ id, onBack, can, onNotice }: { id: string; onBack: ()
   }
   async function convertToInvoice() {
     if (!quote) return;
-    const invNumber = `INV-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`;
-    const { data: inv } = await supabase.from('invoices').insert({ invoice_number: invNumber, customer_id: quote.customer_id, vehicle_id: quote.vehicle_id, job_card_id: quote.job_card_id, subtotal_minor: quote.subtotal_minor, discount_minor: quote.discount_minor, tax_minor: quote.tax_minor, total_minor: quote.total_minor, status: 'ISSUED' }).select().single();
-    if (inv) { await supabase.from('quotation_items').select('*').eq('quotation_id', id).then(({ data: items }) => { if (items) for (const item of items as QuotationItem[]) void supabase.from('invoice_items').insert({ invoice_id: inv.id, item_type: item.item_type, description: item.description, quantity: item.quantity, unit_price_minor: item.unit_price_minor, tax_rate: item.tax_rate, line_total_minor: item.line_total_minor }); }); await supabase.from('quotations').update({ status: 'CONVERTED', converted_invoice_id: inv.id }).eq('id', id); }
+    const { data: invNumber, error: numError } = await supabase.rpc('generate_document_number', { p_doc_type: 'INV', p_prefix: 'INV', p_permission: 'invoice.create' });
+    if (numError || !invNumber) { onNotice('Unable to generate an invoice number.'); return; }
+    const { data: inv, error: invError } = await supabase.from('invoices').insert({ invoice_number: invNumber, customer_id: quote.customer_id, vehicle_id: quote.vehicle_id, job_card_id: quote.job_card_id, subtotal_minor: quote.subtotal_minor, discount_minor: quote.discount_minor, tax_minor: quote.tax_minor, total_minor: quote.total_minor, status: 'ISSUED' }).select().single();
+    if (invError || !inv) { onNotice(quote.job_card_id ? 'This work order already has an invoice.' : 'Unable to create the invoice.'); return; }
+    await supabase.from('quotation_items').select('*').eq('quotation_id', id).then(({ data: items }) => { if (items) for (const item of items as QuotationItem[]) void supabase.from('invoice_items').insert({ invoice_id: inv.id, item_type: item.item_type, description: item.description, quantity: item.quantity, unit_price_minor: item.unit_price_minor, tax_rate: item.tax_rate, line_total_minor: item.line_total_minor }); });
+    await supabase.from('quotations').update({ status: 'CONVERTED', converted_invoice_id: inv.id }).eq('id', id);
     onNotice('Quotation converted to invoice.'); onBack();
   }
   async function reload() { supabase.from('quotations').select('*, customers(*), vehicles(*), quotation_items(*)').eq('id', id).maybeSingle().then(({ data }) => setQuote(data as typeof quote)); }
@@ -2116,6 +2130,11 @@ function ReceiptsSection() {
 type ReportRow = Record<string, unknown>;
 type ReportColumn = { key: string; label: string; numeric?: boolean; render: (row: ReportRow) => React.ReactNode; csv: (row: ReportRow) => string | number };
 type ReportKpi = { label: string; value: string; icon: React.ReactNode; tone: string };
+
+// KPI cards sum whatever rows were fetched, not a true unlimited aggregate — this cap was
+// previously 100, silently excluding older records from "Total invoiced" etc. on a report
+// spanning more than 100 rows. Raised generously; a truncation notice covers the rest.
+const REPORT_ROW_LIMIT = 2000;
 
 const REPORT_TYPES = [
   { id: 'operations', label: 'Operations', icon: <ClipboardList size={16} /> },
@@ -2253,27 +2272,27 @@ function ReportsSection() {
       setLoading(true);
       let result: ReportRow[] = [];
       if (reportType === 'operations') {
-        const { data } = await supabase.from('job_cards').select('job_number,status,created_at,customers(full_name),vehicles(registration_number)').is('deleted_at', null).order('created_at', { ascending: false }).limit(100);
+        const { data } = await supabase.from('job_cards').select('job_number,status,created_at,customers(full_name),vehicles(registration_number)').is('deleted_at', null).order('created_at', { ascending: false }).limit(REPORT_ROW_LIMIT);
         result = (data ?? []) as ReportRow[];
       } else if (reportType === 'financial') {
-        const { data } = await supabase.from('invoices').select('invoice_number,status,created_at,total_minor,amount_paid_minor,customers(full_name),job_cards(job_number)').order('created_at', { ascending: false }).limit(100);
+        const { data } = await supabase.from('invoices').select('invoice_number,status,created_at,total_minor,amount_paid_minor,customers(full_name),job_cards(job_number)').order('created_at', { ascending: false }).limit(REPORT_ROW_LIMIT);
         result = (data ?? []) as ReportRow[];
       } else if (reportType === 'inventory') {
         const { data } = await supabase.from('parts').select('sku,name,category,quantity_on_hand,reorder_level,cost_price_minor,selling_price_minor').eq('active', true).order('name');
         result = (data ?? []) as ReportRow[];
       } else if (reportType === 'procurement') {
-        const { data } = await supabase.from('purchase_orders').select('po_number,status,order_date,total_minor,suppliers(name)').order('created_at', { ascending: false }).limit(100);
+        const { data } = await supabase.from('purchase_orders').select('po_number,status,order_date,total_minor,suppliers(name)').order('created_at', { ascending: false }).limit(REPORT_ROW_LIMIT);
         result = (data ?? []) as ReportRow[];
       } else if (reportType === 'technician') {
         const { data: emps } = await supabase.from('employees').select('full_name,specialization,phone,user_id').eq('active', true).order('full_name');
         const empList = (emps ?? []) as ReportRow[];
         for (const emp of empList) {
-          const userId = emp.user_id as string | null;
-          emp.active_jobs = userId ? (await supabase.from('job_card_assignments').select('id', { count: 'exact', head: true }).eq('technician_id', userId).is('completed_at', null)).count ?? 0 : 0;
+          const fullName = emp.full_name as string;
+          emp.active_jobs = (await supabase.from('job_card_signoffs').select('job_card_id, job_cards!inner(status)', { count: 'exact', head: true }).eq('role', 'TECHNICIAN').eq('name', fullName).not('job_cards.status', 'in', '(COMPLETED,CANCELLED)')).count ?? 0;
         }
         result = empList;
       } else if (reportType === 'scrap') {
-        const { data } = await supabase.from('scrap_purchases').select('date,supplier,quantity_purchased,rate_used_minor,purchase_amount_minor,status,scrap_items(name)').eq('status', 'ACTIVE').order('date', { ascending: false }).limit(100);
+        const { data } = await supabase.from('scrap_purchases').select('date,supplier,quantity_purchased,rate_used_minor,purchase_amount_minor,status,scrap_items(name)').eq('status', 'ACTIVE').order('date', { ascending: false }).limit(REPORT_ROW_LIMIT);
         result = (data ?? []) as ReportRow[];
       }
       setRows(result); setLoading(false);
@@ -2295,6 +2314,7 @@ function ReportsSection() {
     <div className="page-heading"><div><p className="eyebrow">Business intelligence</p><h1>Reports</h1><p className="muted">Export and analyze your workshop data.</p></div><div className="heading-actions"><button className="button secondary" onClick={exportCSV}><Download size={16} /> Export CSV</button></div></div>
     <div className="report-tabs">{REPORT_TYPES.map((t) => <button key={t.id} className={reportType === t.id ? 'report-tab active' : 'report-tab'} onClick={() => setReportType(t.id)}>{t.icon} {t.label}</button>)}</div>
     {!loading && rows.length > 0 && <div className="kpi-row">{kpis.map((k) => <div className="metric-card" key={k.label}><div className={`metric-icon ${k.tone}`}>{k.icon}</div><div className="metric-copy"><span>{k.label}</span><strong>{k.value}</strong></div></div>)}</div>}
+    {!loading && rows.length === REPORT_ROW_LIMIT && <div className="form-error" style={{ marginBottom: 16 }}>Showing the most recent {REPORT_ROW_LIMIT.toLocaleString()} records — there may be more, and the totals above only cover the records shown here.</div>}
     <section className="panel table-panel">
       {loading ? <Loading /> : rows.length === 0 ? <Empty title="No data" text="No records for this report." /> : <div className="report-table-wrap"><table className="report-table"><thead><tr>{columns.map((c) => <th key={c.key} className={c.numeric ? 'numeric' : ''}>{c.label}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i}>{columns.map((c) => <td key={c.key} className={c.numeric ? 'numeric' : ''}>{c.render(row)}</td>)}</tr>)}</tbody></table></div>}
     </section>
@@ -2340,6 +2360,7 @@ function SettingsSection({ onNotice }: { onNotice: (m: string) => void }) {
   async function save() {
     if (!settings) return;
     const { error } = await supabase.from('business_settings').update({ business_name: settings.business_name, address: settings.address, phone: settings.phone, email: settings.email, tax_rate: settings.tax_rate, currency: settings.currency, invoice_prefix: settings.invoice_prefix, quote_prefix: settings.quote_prefix, job_card_prefix: settings.job_card_prefix, receipt_prefix: settings.receipt_prefix, job_card_terms: settings.job_card_terms }).eq('id', settings.id);
+    if (!error) clearTaxRateCache();
     onNotice(error ? 'Unable to save settings.' : 'Settings saved successfully.');
   }
   if (loading || !settings) return <Loading />;
@@ -2443,11 +2464,11 @@ function UsersSection({ onNotice }: { onNotice: (m: string) => void }) {
     <section className="panel table-panel" style={{ marginBottom: 24 }}>
       <div className="panel-heading"><div><p className="eyebrow">Directory</p><h3>Staff</h3></div></div>
       {staff.length === 0 ? <Empty title="No staff yet" text="Invite your first employee to get started." /> : <div className="data-table">{staff.map((person) => {
-        const roleName = person.user_roles?.[0]?.roles?.name ?? '';
+        const roleId = person.user_roles?.[0]?.role_id ?? '';
         return <div className="table-row" key={person.id}>
           <div className="job-icon"><UserCog size={17} /></div>
           <div><strong>{person.full_name || 'Unnamed'}</strong><span>{person.phone ?? '—'}</span></div>
-          <select value={roleName} onChange={(e) => void changeRole(person.id, e.target.value)} disabled={!person.user_roles?.[0]}>
+          <select value={roleId} onChange={(e) => void changeRole(person.id, e.target.value)} disabled={!person.user_roles?.[0]}>
             <option value="" disabled>No role</option>
             {roles.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
           </select>
@@ -2535,6 +2556,10 @@ function InviteEmployeeForm({ roles, onClose, onSaved }: { roles: Role[]; onClos
 function SectionPanel({ eyebrow, title, onNew, newLabel, children }: { eyebrow: string; title: string; onNew?: () => void; newLabel?: string; children: React.ReactNode }) {
   return <section className="panel table-panel"><div className="panel-heading"><div><p className="eyebrow">{eyebrow}</p><h3>{title}</h3></div>{onNew && <button className="button primary small" onClick={onNew}><Plus size={16} /> {newLabel}</button>}</div>{children}</section>;
 }
+function PoweredByFooter({ className }: { className?: string }) {
+  return <a className={`powered-by ${className ?? ''}`} href="https://qeemlabs.co.ke" target="_blank" rel="noopener noreferrer">Created and Powered by Qeem Labs Ltd</a>;
+}
+
 function Loading() { return <div className="empty"><div className="empty-icon"><Activity size={20} /></div><strong>Loading...</strong></div>; }
 function Empty({ title, text }: { title: string; text: string }) { return <div className="empty"><div className="empty-icon"><ClipboardList size={20} /></div><strong>{title}</strong><span>{text}</span></div>; }
 function BackBar({ onBack, label }: { onBack: () => void; label: string }) { return <div className="back-bar"><button onClick={onBack}><ChevronRight size={16} className="back-icon" /> {label}</button></div>; }
@@ -2635,10 +2660,58 @@ function SupplierForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: 
 }
 
 function POForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string) => void }) {
-  const [supplierId, setSupplierId] = useState(''); const [suppliers, setSuppliers] = useState<Supplier[]>([]); const [busy, setBusy] = useState(false);
+  const [supplierId, setSupplierId] = useState(''); const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [orderDate, setOrderDate] = useState(localDateStr()); const [expectedDelivery, setExpectedDelivery] = useState('');
+  const [parts, setParts] = useState<Part[]>([]);
+  const [pickPartId, setPickPartId] = useState(''); const [pickQty, setPickQty] = useState('1'); const [pickCost, setPickCost] = useState('0');
+  const [items, setItems] = useState<{ partId: string; name: string; sku: string; quantity: number; unitCostMinor: number }[]>([]);
+  const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   useEffect(() => { supabase.from('suppliers').select('*').eq('status', 'ACTIVE').is('deleted_at', null).order('name').then(({ data }) => setSuppliers((data ?? []) as Supplier[])); }, []);
-  async function submit(e: FormEvent) { e.preventDefault(); setBusy(true); const poNumber = `PO-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`; const { error } = await supabase.from('purchase_orders').insert({ po_number: poNumber, supplier_id: supplierId, status: 'DRAFT', order_date: new Date().toISOString().slice(0, 10) }); setBusy(false); onSaved(error ? 'Unable to create PO.' : 'Purchase order created.'); }
-  return <Modal title="New purchase order" onClose={onClose}><form onSubmit={submit} className="modal-form"><label>Supplier<select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} required><option value="">Select supplier...</option>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label><button className="button primary wide" disabled={busy || !supplierId}>{busy ? 'Creating...' : 'Create PO'} <ArrowUpRight size={16} /></button></form></Modal>;
+  useEffect(() => { supabase.from('parts').select('*').eq('active', true).order('name').limit(500).then(({ data }) => setParts((data ?? []) as Part[])); }, []);
+
+  function addItem() {
+    const part = parts.find((p) => p.id === pickPartId); if (!part) return;
+    const qty = Math.max(1, parseInt(pickQty) || 1); const cost = Math.max(0, Math.round((parseFloat(pickCost) || 0) * 100));
+    setItems((prev) => {
+      const existing = prev.find((i) => i.partId === part.id);
+      if (existing) return prev.map((i) => i.partId === part.id ? { ...i, quantity: i.quantity + qty, unitCostMinor: cost } : i);
+      return [...prev, { partId: part.id, name: part.name, sku: part.sku, quantity: qty, unitCostMinor: cost }];
+    });
+    setPickPartId(''); setPickQty('1'); setPickCost('0');
+  }
+  function removeItem(partId: string) { setItems((prev) => prev.filter((i) => i.partId !== partId)); }
+  const totalMinor = items.reduce((s, i) => s + i.quantity * i.unitCostMinor, 0);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setError('');
+    if (items.length === 0) { setError('Add at least one part to the order.'); return; }
+    setBusy(true);
+    const { error: rpcError } = await supabase.rpc('create_purchase_order', {
+      p_supplier_id: supplierId, p_order_date: orderDate, p_expected_delivery: expectedDelivery || null,
+      p_items: items.map((i) => ({ part_id: i.partId, quantity: i.quantity, unit_cost_minor: i.unitCostMinor })),
+    });
+    setBusy(false);
+    if (rpcError) { setError(rpcError.message || 'Unable to create the purchase order.'); return; }
+    onSaved('Purchase order created.');
+  }
+
+  return <Modal title="New purchase order" onClose={onClose}><form onSubmit={submit} className="modal-form">
+    <label>Supplier<select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} required><option value="">Select supplier...</option>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+    <div className="form-row">
+      <label>Order date<input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} required /></label>
+      <label>Expected delivery <span className="optional">Optional</span><input type="date" value={expectedDelivery} onChange={(e) => setExpectedDelivery(e.target.value)} /></label>
+    </div>
+    <div className="form-row" style={{ gridTemplateColumns: '1fr 80px 120px auto', alignItems: 'end' }}>
+      <label>Part<select value={pickPartId} onChange={(e) => { const p = parts.find((x) => x.id === e.target.value); setPickPartId(e.target.value); if (p) setPickCost((p.cost_price_minor / 100).toString()); }}><option value="">Select part...</option>{parts.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}</select></label>
+      <label>Qty<input type="number" min="1" value={pickQty} onChange={(e) => setPickQty(e.target.value)} /></label>
+      <label>Unit cost (KES)<input type="number" min="0" step="0.01" value={pickCost} onChange={(e) => setPickCost(e.target.value)} /></label>
+      <button type="button" className="button secondary" disabled={!pickPartId} onClick={addItem}><Plus size={15} /> Add</button>
+    </div>
+    {items.length > 0 && <div className="data-table">{items.map((i) => <div className="table-row" key={i.partId}><div><strong>{i.name}</strong><span>{i.sku}</span></div><span className="table-muted">{i.quantity} × {formatKes(i.unitCostMinor)}</span><span className="table-muted">{formatKes(i.quantity * i.unitCostMinor)}</span><button type="button" className="close-button" style={{ width: 28, height: 28 }} onClick={() => removeItem(i.partId)}><X size={14} /></button></div>)}</div>}
+    {items.length > 0 && <div className="total-row"><strong>Total</strong><span>{formatKes(totalMinor)}</span></div>}
+    {error && <div className="form-error">{error}</div>}
+    <button className="button primary wide" disabled={busy || !supplierId || items.length === 0}>{busy ? 'Creating...' : 'Create PO'} <ArrowUpRight size={16} /></button>
+  </form></Modal>;
 }
 
 function QuotationForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string) => void }) {
@@ -2647,13 +2720,16 @@ function QuotationForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m:
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true);
     const job = jobs.find((j) => j.id === jobId); if (!job) { setBusy(false); return; }
+    const taxRate = await getTaxRate();
     const { data: labour } = await supabase.from('job_card_labour').select('*').eq('job_card_id', jobId);
     const { data: parts } = await supabase.from('job_card_parts').select('*, parts(name,selling_price_minor)').eq('job_card_id', jobId);
-    const items: { item_type: 'LABOUR' | 'PART'; description: string; quantity: number; unit_price_minor: number; tax_rate: number; line_total_minor: number }[] = [];
+    const items: { item_type: 'LABOUR' | 'PART' | 'OTHER'; description: string; quantity: number; unit_price_minor: number; tax_rate: number; line_total_minor: number }[] = [];
     (labour ?? []).forEach((l: JobCardLabour) => items.push({ item_type: 'LABOUR', description: l.description, quantity: l.quantity, unit_price_minor: l.unit_price_minor, tax_rate: l.tax_rate, line_total_minor: computeLineTotal(l.quantity, l.unit_price_minor, l.tax_rate) }));
-    (parts ?? []).forEach((p: JobCardPart & { parts: Part | null }) => items.push({ item_type: 'PART', description: p.parts?.name ?? 'Part', quantity: p.quantity, unit_price_minor: p.unit_price_minor, tax_rate: 16, line_total_minor: computeLineTotal(p.quantity, p.unit_price_minor, 16) }));
+    (parts ?? []).forEach((p: JobCardPart & { parts: Part | null }) => items.push({ item_type: 'PART', description: p.parts?.name ?? 'Part', quantity: p.quantity, unit_price_minor: p.unit_price_minor, tax_rate: taxRate, line_total_minor: computeLineTotal(p.quantity, p.unit_price_minor, taxRate) }));
+    if (job.other_charges_minor > 0) items.push({ item_type: 'OTHER', description: 'Other charges', quantity: 1, unit_price_minor: job.other_charges_minor, tax_rate: 0, line_total_minor: job.other_charges_minor });
     const subtotal = items.reduce((s, i) => s + i.line_total_minor, 0);
-    const quoteNumber = `QUO-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`;
+    const { data: quoteNumber, error: numError } = await supabase.rpc('generate_document_number', { p_doc_type: 'QUO', p_prefix: 'QUO', p_permission: 'quotation.create' });
+    if (numError || !quoteNumber) { setBusy(false); onSaved('Unable to generate a quotation number.'); return; }
     const validUntil = new Date(); validUntil.setDate(validUntil.getDate() + 30);
     const { data: quote } = await supabase.from('quotations').insert({ quote_number: quoteNumber, customer_id: job.customer_id, vehicle_id: job.vehicle_id, job_card_id: jobId, subtotal_minor: subtotal, discount_minor: 0, tax_minor: 0, total_minor: subtotal, valid_until: validUntil.toISOString().slice(0, 10), status: 'PENDING_APPROVAL' }).select().single();
     if (quote) for (const item of items) void supabase.from('quotation_items').insert({ quotation_id: quote.id, ...item });
@@ -2664,20 +2740,34 @@ function QuotationForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m:
 
 function InvoiceForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string) => void }) {
   const [jobId, setJobId] = useState(''); const [jobs, setJobs] = useState<(JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[]>([]); const [busy, setBusy] = useState(false);
-  useEffect(() => { supabase.from('job_cards').select('*, vehicles(registration_number), customers(full_name)').in('status', ['IN_PROGRESS','COMPLETED']).is('deleted_at', null).order('created_at', { ascending: false }).limit(50).then(({ data }) => setJobs((data ?? []) as (JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[])); }, []);
+  useEffect(() => {
+    (async () => {
+      const [jobsRes, invoicedRes] = await Promise.all([
+        supabase.from('job_cards').select('*, vehicles(registration_number), customers(full_name)').in('status', ['IN_PROGRESS','COMPLETED']).is('deleted_at', null).order('created_at', { ascending: false }).limit(50),
+        supabase.from('invoices').select('job_card_id').not('job_card_id', 'is', null).neq('status', 'VOID'),
+      ]);
+      const invoicedJobIds = new Set(((invoicedRes.data ?? []) as { job_card_id: string }[]).map((i) => i.job_card_id));
+      const allJobs = (jobsRes.data ?? []) as (JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[];
+      setJobs(allJobs.filter((j) => !invoicedJobIds.has(j.id)));
+    })();
+  }, []);
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true);
     const job = jobs.find((j) => j.id === jobId); if (!job) { setBusy(false); return; }
+    const taxRate = await getTaxRate();
     const { data: labour } = await supabase.from('job_card_labour').select('*').eq('job_card_id', jobId);
     const { data: parts } = await supabase.from('job_card_parts').select('*, parts(name)').eq('job_card_id', jobId);
-    const items: { item_type: 'LABOUR' | 'PART'; description: string; quantity: number; unit_price_minor: number; tax_rate: number; line_total_minor: number }[] = [];
+    const items: { item_type: 'LABOUR' | 'PART' | 'OTHER'; description: string; quantity: number; unit_price_minor: number; tax_rate: number; line_total_minor: number }[] = [];
     (labour ?? []).forEach((l: JobCardLabour) => items.push({ item_type: 'LABOUR', description: l.description, quantity: l.quantity, unit_price_minor: l.unit_price_minor, tax_rate: l.tax_rate, line_total_minor: computeLineTotal(l.quantity, l.unit_price_minor, l.tax_rate) }));
-    (parts ?? []).forEach((p: JobCardPart & { parts: Part | null }) => items.push({ item_type: 'PART', description: p.parts?.name ?? 'Part', quantity: p.quantity, unit_price_minor: p.unit_price_minor, tax_rate: 16, line_total_minor: computeLineTotal(p.quantity, p.unit_price_minor, 16) }));
+    (parts ?? []).forEach((p: JobCardPart & { parts: Part | null }) => items.push({ item_type: 'PART', description: p.parts?.name ?? 'Part', quantity: p.quantity, unit_price_minor: p.unit_price_minor, tax_rate: taxRate, line_total_minor: computeLineTotal(p.quantity, p.unit_price_minor, taxRate) }));
+    if (job.other_charges_minor > 0) items.push({ item_type: 'OTHER', description: 'Other charges', quantity: 1, unit_price_minor: job.other_charges_minor, tax_rate: 0, line_total_minor: job.other_charges_minor });
     const subtotal = items.reduce((s, i) => s + i.line_total_minor, 0);
-    const invNumber = `INV-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`;
+    const { data: invNumber, error: numError } = await supabase.rpc('generate_document_number', { p_doc_type: 'INV', p_prefix: 'INV', p_permission: 'invoice.create' });
+    if (numError || !invNumber) { setBusy(false); onSaved('Unable to generate an invoice number.'); return; }
     const dueDate = new Date(); dueDate.setDate(dueDate.getDate() + 14);
     const { data: inv } = await supabase.from('invoices').insert({ invoice_number: invNumber, customer_id: job.customer_id, vehicle_id: job.vehicle_id, job_card_id: jobId, subtotal_minor: subtotal, discount_minor: 0, tax_minor: 0, total_minor: subtotal, due_date: dueDate.toISOString().slice(0, 10), status: 'ISSUED' }).select().single();
-    if (inv) for (const item of items) void supabase.from('invoice_items').insert({ invoice_id: inv.id, ...item });
+    if (!inv) { setBusy(false); onSaved('This work order already has an invoice.'); return; }
+    for (const item of items) void supabase.from('invoice_items').insert({ invoice_id: inv.id, ...item });
     setBusy(false); onSaved('Invoice created from work order.');
   }
   return <Modal title="Create invoice" onClose={onClose}><form onSubmit={submit} className="modal-form"><label>Work order<select value={jobId} onChange={(e) => setJobId(e.target.value)} required><option value="">Select completed job...</option>{jobs.map((j) => <option key={j.id} value={j.id}>{j.job_number} · {j.vehicles?.registration_number ?? 'Vehicle'} · {j.customers?.full_name ?? 'Customer'}</option>)}</select></label><button className="button primary wide" disabled={busy || !jobId}>{busy ? 'Creating...' : 'Create invoice'} <ArrowUpRight size={16} /></button></form></Modal>;

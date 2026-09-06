@@ -35,7 +35,9 @@ async function cycleAggregates() {
   const adjustedByCycle = new Map<string, number>();
   for (const a of (adjustments ?? []) as { stock_cycle_id: string; adjustment_type: string; quantity: number }[]) {
     if (a.adjustment_type === 'CLEARANCE') clearedByCycle.set(a.stock_cycle_id, (clearedByCycle.get(a.stock_cycle_id) ?? 0) + a.quantity);
-    else {
+    else if (a.adjustment_type !== 'OPENING') {
+      // OPENING rows mirror the cycle's own opening_quantity, already shown separately —
+      // folding them in here would double-count the carried-over stock.
       const signed = a.adjustment_type === 'CORRECTION_DECREASE' ? -a.quantity : a.quantity;
       adjustedByCycle.set(a.stock_cycle_id, (adjustedByCycle.get(a.stock_cycle_id) ?? 0) + signed);
     }

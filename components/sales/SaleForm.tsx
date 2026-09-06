@@ -84,6 +84,7 @@ export default function SaleForm({ onClose, onSaved, can }: { onClose: () => voi
     if (!can('sales.create')) { setFormError('You are not authorized to create sales.'); return; }
     if (items.length === 0) { setFormError('Add at least one item to the sale.'); return; }
     if (hasOverStockItem) { setFormError('One or more items exceed available stock.'); return; }
+    if (hasZeroPricedItem && !canOverridePrice) { setFormError('One or more items have no selling price set. Set a price on the part first, or ask for price-override access.'); return; }
     if (paymentStatus === 'PARTIAL' && amountPaidMinor <= 0) { setFormError('Enter an amount paid for a partial payment.'); return; }
     if (isMpesa && !mpesaCode.trim()) { setFormError('Enter the M-Pesa transaction code.'); return; }
     if (isMpesa && !mpesaSentAt) { setFormError('Enter the time the M-Pesa payment was sent.'); return; }

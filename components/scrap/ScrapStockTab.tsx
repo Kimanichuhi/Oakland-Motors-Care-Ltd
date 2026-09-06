@@ -121,7 +121,7 @@ function ScrapItemHistory({ item, can, onBack, onNotice, onRefresh }: {
 
       const purchaseRows: TimelineRow[] = ((purchases ?? []) as (ScrapPurchase & { scrap_daily_records: { date: string } | null })[]).map((p) => ({
         key: `p-${p.id}`,
-        date: p.scrap_daily_records?.date ?? p.created_at,
+        date: p.date ?? p.scrap_daily_records?.date ?? p.created_at,
         cycleNumber: cycleNumberById.get(p.stock_cycle_id) ?? 0,
         type: 'PURCHASE',
         before: p.opening_stock,

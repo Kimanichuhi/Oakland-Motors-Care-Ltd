@@ -74,7 +74,7 @@ export const PAYMENT_METHODS = ['CASH','MPESA','BANK','CARD','OTHER'] as const;
 export const SALES_PAYMENT_METHODS = ['CASH','MPESA','BANK','CARD','CREDIT','JOB_CARD','OTHER'] as const;
 export const SALES_PAYMENT_STATUSES = ['PAID','PARTIAL','PENDING'] as const;
 export const SALE_STATUSES = ['COMPLETED','PARTIALLY_RETURNED','RETURNED','VOIDED'] as const;
-export const CUSTOMER_SALE_TYPES = ['WALK_IN','JOB_CARD','GARAGE_WORKSHOP'] as const;
+export const CUSTOMER_SALE_TYPES = ['WALK_IN','VEHICLE_OWNER','BUSINESS','GARAGE_WORKSHOP','OTHER'] as const;
 
 export const PART_CATEGORIES = [
   'Wheel Bearings','Tie Rod Ends','CV Joints','Ignition Coils','Coil Springs','Shock Spacers',

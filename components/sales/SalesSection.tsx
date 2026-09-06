@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { Sale } from '@/lib/types';
-import { formatKes, formatDateTime, downloadCSV } from '@/lib/formatting';
+import { formatKes, formatDateTime, downloadCSV, localDateStr } from '@/lib/formatting';
 import { statusStyles } from '@/lib/constants';
 import { Plus, Search, MoreVertical, Eye, Download, Printer, X } from 'lucide-react';
 
@@ -68,7 +68,7 @@ export default function SalesSection({ query, onNew, onSelect, can }: { query: s
   const filteredSales = useMemo(() => {
     const term = productFilter.trim().toLowerCase();
     return sales.filter((s) => {
-      const saleDay = s.sale_date.slice(0, 10);
+      const saleDay = localDateStr(new Date(s.sale_date));
       if (fromDate && saleDay < fromDate) return false;
       if (toDate && saleDay > toDate) return false;
       if (term && !s.sale_items.some((it) => it.part_name.toLowerCase().includes(term))) return false;

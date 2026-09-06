@@ -17,9 +17,14 @@ export async function loadUserPermissions(): Promise<UserPermission> {
   if (!session) return { permissions: [], role: '', roleLabel: '', fullName: '' };
 
   const [{ data: profile }, { data: userRoles }] = await Promise.all([
-    supabase.from('profiles').select('full_name').eq('id', session.user.id).maybeSingle(),
+    supabase.from('profiles').select('full_name, status').eq('id', session.user.id).maybeSingle(),
     supabase.from('user_roles').select('role_id, roles(name,label)').eq('user_id', session.user.id),
   ]);
+
+  if (profile && profile.status !== 'ACTIVE') {
+    cached = { permissions: [], role: '', roleLabel: '', fullName: profile.full_name ?? session.user.email ?? 'User' };
+    return cached;
+  }
 
   const roles = (userRoles as unknown as { role_id: string; roles: { name: string; label: string } }[]) ?? [];
   const primaryRole = roles[0]?.roles;
