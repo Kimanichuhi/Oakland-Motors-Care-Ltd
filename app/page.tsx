@@ -19,13 +19,19 @@ import {
 import SalesSection from '@/components/sales/SalesSection';
 import SaleDetail from '@/components/sales/SaleDetail';
 import SaleForm from '@/components/sales/SaleForm';
-import ScrapSection from '@/components/scrap/ScrapSection';
+import ScrapDashboardPage from '@/components/scrap/ScrapDashboardPage';
+import ScrapRecordsPage from '@/components/scrap/ScrapRecordsPage';
+import ScrapStockPage from '@/components/scrap/ScrapStockPage';
+import ScrapFinancesPage from '@/components/scrap/ScrapFinancesPage';
+import ScrapReportsPage from '@/components/scrap/ScrapReportsPage';
+import ScrapTypesPage from '@/components/scrap/ScrapTypesPage';
 import VehicleRegisterSection from '@/components/vehicle-register/VehicleRegisterSection';
 
 type SectionId =
   | 'dashboard' | 'customers' | 'vehicles' | 'vehicleregister' | 'jobcards' | 'services' | 'technicians'
   | 'sales' | 'parts' | 'stockmovements' | 'lowstock' | 'suppliers' | 'procurement'
-  | 'quotations' | 'invoices' | 'payments' | 'receipts' | 'scrap'
+  | 'quotations' | 'invoices' | 'payments' | 'receipts'
+  | 'scrapdashboard' | 'scraprecords' | 'scrapstock' | 'scrapfinances' | 'scrapreports' | 'scraptypes'
   | 'reports' | 'notifications' | 'audit' | 'settings' | 'users';
 
 const NAV_GROUPS: { label: string; items: { id: SectionId; label: string; icon: React.ReactNode; perm: string }[] }[] = [
@@ -47,7 +53,12 @@ const NAV_GROUPS: { label: string; items: { id: SectionId; label: string; icon: 
     { id: 'procurement', label: 'Procurement', icon: <ShoppingCart size={18} />, perm: 'purchase_order.view' },
   ] },
   { label: 'Scrap Yard', items: [
-    { id: 'scrap', label: 'Scrap Management', icon: <Recycle size={18} />, perm: 'scrap.view' },
+    { id: 'scrapdashboard', label: 'Overview', icon: <LayoutDashboard size={18} />, perm: 'scrap.view' },
+    { id: 'scraprecords', label: 'Daily Records', icon: <ClipboardList size={18} />, perm: 'scrap.view' },
+    { id: 'scrapstock', label: 'Stock Position', icon: <Boxes size={18} />, perm: 'scrap.view' },
+    { id: 'scrapfinances', label: 'Finances', icon: <CircleDollarSign size={18} />, perm: 'scrap.view' },
+    { id: 'scrapreports', label: 'Reports', icon: <Gauge size={18} />, perm: 'scrap.view' },
+    { id: 'scraptypes', label: 'Scrap Types & Rates', icon: <Recycle size={18} />, perm: 'scrap.manage' },
   ] },
   { label: 'Finance', items: [
     { id: 'quotations', label: 'Quotations', icon: <FileText size={18} />, perm: 'quotation.view' },
@@ -162,6 +173,7 @@ export default function Home() {
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
+  const [selectedTechnicianId, setSelectedTechnicianId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [permsLoaded, setPermsLoaded] = useState(false);
@@ -240,7 +252,7 @@ export default function Home() {
   function navigateToSearchResult(sectionId: SectionId, id: string) {
     setSection(sectionId);
     setSelectedJobId(null); setSelectedVehicleId(null); setSelectedCustomerId(null); setSelectedInvoiceId(null);
-    setSelectedQuotationId(null); setSelectedPOId(null); setSelectedSupplierId(null); setSelectedSaleId(null); setSelectedPartId(null);
+    setSelectedQuotationId(null); setSelectedPOId(null); setSelectedSupplierId(null); setSelectedSaleId(null); setSelectedPartId(null); setSelectedTechnicianId(null);
     if (sectionId === 'customers') setSelectedCustomerId(id);
     else if (sectionId === 'vehicles') setSelectedVehicleId(id);
     else if (sectionId === 'jobcards') setSelectedJobId(id);
@@ -272,7 +284,7 @@ export default function Home() {
       <nav className="nav-list">
         {visibleNav.map((group, gi) => <div key={gi} className="nav-group">
           {group.label && <p className="nav-label">{group.label}</p>}
-          {group.items.map((item) => <button key={item.id} className={section === item.id ? 'nav-item active' : 'nav-item'} onClick={() => { setSection(item.id); setShowMobileNav(false); setSelectedJobId(null); setSelectedVehicleId(null); setSelectedCustomerId(null); setSelectedInvoiceId(null); setSelectedQuotationId(null); setSelectedPOId(null); setSelectedSupplierId(null); setSelectedSaleId(null); setSelectedPartId(null); }}>{item.icon}{item.label}</button>)}
+          {group.items.map((item) => <button key={item.id} className={section === item.id ? 'nav-item active' : 'nav-item'} onClick={() => { setSection(item.id); setShowMobileNav(false); setSelectedJobId(null); setSelectedVehicleId(null); setSelectedCustomerId(null); setSelectedInvoiceId(null); setSelectedQuotationId(null); setSelectedPOId(null); setSelectedSupplierId(null); setSelectedSaleId(null); setSelectedPartId(null); setSelectedTechnicianId(null); }}>{item.icon}{item.label}</button>)}
         </div>)}
       </nav>
       <div className="sidebar-bottom">
@@ -281,7 +293,6 @@ export default function Home() {
           <div><strong className="truncate">{userPerms.fullName || 'User'}</strong><span>{userPerms.roleLabel}</span></div>
           <button aria-label="Sign out" onClick={() => void signOut()}><LogOut size={16} /></button>
         </div>
-        <PoweredByFooter className="sidebar" />
       </div>
     </aside>
     <section className="content-area">
@@ -335,6 +346,8 @@ export default function Home() {
           setSelectedSaleId={setSelectedSaleId}
           selectedPartId={selectedPartId}
           setSelectedPartId={setSelectedPartId}
+          selectedTechnicianId={selectedTechnicianId}
+          setSelectedTechnicianId={setSelectedTechnicianId}
           showCustomerForm={showCustomerForm}
           setShowCustomerForm={setShowCustomerForm}
           showVehicleForm={showVehicleForm}
@@ -399,6 +412,7 @@ type SectionProps = {
   selectedSupplierId: string | null; setSelectedSupplierId: (id: string | null) => void;
   selectedSaleId: string | null; setSelectedSaleId: (id: string | null) => void;
   selectedPartId: string | null; setSelectedPartId: (id: string | null) => void;
+  selectedTechnicianId: string | null; setSelectedTechnicianId: (id: string | null) => void;
   showCustomerForm: boolean; setShowCustomerForm: (v: boolean) => void;
   showVehicleForm: boolean; setShowVehicleForm: (v: boolean) => void;
   showJobForm: boolean; setShowJobForm: (v: boolean) => void;
@@ -418,12 +432,12 @@ type SectionProps = {
 function SectionRouter(props: SectionProps) {
   const p = props;
   switch (p.section) {
-    case 'dashboard': return <DashboardSection onNewJob={() => p.setShowJobForm(true)} onNewCustomer={() => p.setShowCustomerForm(true)} onNewSale={() => p.setShowSaleForm(true)} onReceiveStock={() => p.setShowStockReceiveForm(true)} can={p.can} userPerms={p.userPerms} />;
+    case 'dashboard': return <DashboardSection onNewJob={() => p.setShowJobForm(true)} onNewCustomer={() => p.setShowCustomerForm(true)} onNewSale={() => p.setShowSaleForm(true)} onReceiveStock={() => p.setShowStockReceiveForm(true)} onNavigate={p.setSection} onSelectJob={(id) => { p.setSelectedJobId(id); p.setSection('jobcards'); }} onSelectInvoice={(id) => { p.setSelectedInvoiceId(id); p.setSection('invoices'); }} can={p.can} userPerms={p.userPerms} />;
     case 'customers': return p.selectedCustomerId ? <CustomerDetail id={p.selectedCustomerId} onBack={() => p.setSelectedCustomerId(null)} onNewVehicle={() => p.setShowVehicleForm(true)} onNewJob={() => p.setShowJobForm(true)} can={p.can} /> : <CustomersSection query={p.query} onNew={() => p.setShowCustomerForm(true)} onSelect={(id) => p.setSelectedCustomerId(id)} can={p.can} />;
     case 'vehicles': return p.selectedVehicleId ? <VehicleDetail id={p.selectedVehicleId} onBack={() => p.setSelectedVehicleId(null)} onNewJob={() => p.setShowJobForm(true)} can={p.can} /> : <VehiclesSection query={p.query} onSelect={(id) => p.setSelectedVehicleId(id)} />;
     case 'jobcards': return p.selectedJobId ? <JobDetail id={p.selectedJobId} onBack={() => p.setSelectedJobId(null)} can={p.can} onNotice={p.onNotice} onNewInvoice={() => p.setShowInvoiceForm(true)} /> : <JobsSection query={p.query} onNew={() => p.setShowJobForm(true)} onSelect={(id) => p.setSelectedJobId(id)} onNotice={p.onNotice} can={p.can} />;
     case 'services': return <ServicesSection onNew={() => p.setShowServiceForm(true)} can={p.can} />;
-    case 'technicians': return <TechniciansSection onNew={() => p.setShowTechnicianForm(true)} can={p.can} />;
+    case 'technicians': return p.selectedTechnicianId ? <TechnicianDetail id={p.selectedTechnicianId} onBack={() => p.setSelectedTechnicianId(null)} /> : <TechniciansSection onNew={() => p.setShowTechnicianForm(true)} onSelect={(id) => p.setSelectedTechnicianId(id)} can={p.can} />;
     case 'sales': return p.selectedSaleId ? <SaleDetail id={p.selectedSaleId} onBack={() => p.setSelectedSaleId(null)} can={p.can} onNotice={p.onNotice} /> : <SalesSection query={p.query} onNew={() => p.setShowSaleForm(true)} onSelect={(id) => p.setSelectedSaleId(id)} can={p.can} />;
     case 'parts': return p.selectedPartId ? <PartDetail id={p.selectedPartId} onBack={() => p.setSelectedPartId(null)} can={p.can} onNotice={p.onNotice}
       onNavigateToSale={(saleId) => { p.setSelectedSaleId(saleId); p.setSection('sales'); }}
@@ -436,15 +450,20 @@ function SectionRouter(props: SectionProps) {
       onNavigateToJob={(id) => { p.setSelectedJobId(id); p.setSection('jobcards'); }}
       onNavigateToPO={(id) => { p.setSelectedPOId(id); p.setSection('procurement'); }}
     />;
-    case 'lowstock': return <LowStockSection onSelect={(id) => { p.setSelectedPartId(id); p.setSection('parts'); }} />;
+    case 'lowstock': return <LowStockSection onSelect={(id) => { p.setSelectedPartId(id); p.setSection('parts'); }} onNotice={p.onNotice} can={p.can} onNavigateToPO={(id) => { p.setSelectedPOId(id); p.setSection('procurement'); }} />;
     case 'suppliers': return p.selectedSupplierId ? <SupplierDetail id={p.selectedSupplierId} onBack={() => p.setSelectedSupplierId(null)} onNewPO={() => p.setShowPOForm(true)} can={p.can} /> : <SuppliersSection query={p.query} onNew={() => p.setShowSupplierForm(true)} onSelect={(id) => p.setSelectedSupplierId(id)} can={p.can} />;
     case 'procurement': return p.selectedPOId ? <PODetail id={p.selectedPOId} onBack={() => p.setSelectedPOId(null)} can={p.can} onNotice={p.onNotice} /> : <ProcurementSection onNew={() => p.setShowPOForm(true)} onSelect={(id) => p.setSelectedPOId(id)} can={p.can} />;
     case 'quotations': return p.selectedQuotationId ? <QuotationDetail id={p.selectedQuotationId} onBack={() => p.setSelectedQuotationId(null)} can={p.can} onNotice={p.onNotice} /> : <QuotationsSection onNew={() => p.setShowQuotationForm(true)} onSelect={(id) => p.setSelectedQuotationId(id)} can={p.can} />;
     case 'invoices': return p.selectedInvoiceId ? <InvoiceDetail id={p.selectedInvoiceId} onBack={() => p.setSelectedInvoiceId(null)} onPayment={() => p.setShowPaymentForm(true)} can={p.can} /> : <InvoicesSection query={p.query} onNew={() => p.setShowInvoiceForm(true)} onSelect={(id) => p.setSelectedInvoiceId(id)} can={p.can} />;
-    case 'scrap': return <ScrapSection can={p.can} onNotice={p.onNotice} />;
+    case 'scrapdashboard': return <ScrapDashboardPage can={p.can} onNotice={p.onNotice} onNavigateToStock={() => p.setSection('scrapstock')} />;
+    case 'scraprecords': return <ScrapRecordsPage can={p.can} onNotice={p.onNotice} />;
+    case 'scrapstock': return <ScrapStockPage can={p.can} onNotice={p.onNotice} />;
+    case 'scrapfinances': return <ScrapFinancesPage />;
+    case 'scrapreports': return <ScrapReportsPage can={p.can} />;
+    case 'scraptypes': return <ScrapTypesPage can={p.can} onNotice={p.onNotice} />;
     case 'vehicleregister': return <VehicleRegisterSection can={p.can} onNotice={p.onNotice} />;
-    case 'payments': return <PaymentsSection />;
-    case 'receipts': return <ReceiptsSection />;
+    case 'payments': return <PaymentsSection onNotice={p.onNotice} />;
+    case 'receipts': return <ReceiptsSection onNotice={p.onNotice} />;
     case 'reports': return <ReportsSection />;
     case 'notifications': return <NotificationsSection onRefresh={p.onRefresh} />;
     case 'audit': return <AuditSection />;
@@ -577,9 +596,9 @@ function roleDisplayName(userPerms: UserPermission) {
   return userPerms.role.charAt(0) + userPerms.role.slice(1).toLowerCase();
 }
 
-function DashboardSection({ onNewJob, onNewCustomer, onNewSale, onReceiveStock, can, userPerms }: { onNewJob: () => void; onNewCustomer: () => void; onNewSale: () => void; onReceiveStock: () => void; can: (p: string) => boolean; userPerms: UserPermission }) {
+function DashboardSection({ onNewJob, onNewCustomer, onNewSale, onReceiveStock, onNavigate, onSelectJob, onSelectInvoice, can, userPerms }: { onNewJob: () => void; onNewCustomer: () => void; onNewSale: () => void; onReceiveStock: () => void; onNavigate: (section: SectionId) => void; onSelectJob: (id: string) => void; onSelectInvoice: (id: string) => void; can: (p: string) => boolean; userPerms: UserPermission }) {
   const [stats, setStats] = useState({ activeJobs: 0, completedToday: 0, vehiclesPerWeek: 0, customers: 0, vehicles: 0, lowStock: 0, outOfStock: 0, outstandingInvoices: 0, overdueCount: 0, pendingQuotes: 0, todaySales: 0, weekSales: 0, monthSales: 0 });
-  const [worstOverdue, setWorstOverdue] = useState<{ customer: string; balance: number } | null>(null);
+  const [worstOverdue, setWorstOverdue] = useState<{ id: string; customer: string; balance: number } | null>(null);
   const [recentJobs, setRecentJobs] = useState<(JobCard & { vehicles: { registration_number: string } | null, customers: { full_name: string } | null })[]>([]);
   const [recentSales, setRecentSales] = useState<Sale[]>([]);
   const [topItems, setTopItems] = useState<{ name: string; category: string | null; qty: number }[]>([]);
@@ -599,7 +618,7 @@ function DashboardSection({ onNewJob, onNewCustomer, onNewSale, onReceiveStock, 
         supabase.from('invoices').select('id,total_minor,amount_paid_minor,status,created_at').in('status', ['ISSUED','PART_PAID','OVERDUE']),
         supabase.from('quotations').select('id', { count: 'exact', head: true }).eq('status', 'PENDING_APPROVAL'),
         supabase.from('job_cards').select('vehicle_id').gte('created_at', weekAgo.toISOString()).is('deleted_at', null),
-        supabase.from('invoices').select('total_minor,amount_paid_minor,customers(full_name)').eq('status', 'OVERDUE').order('created_at', { ascending: false }).limit(100),
+        supabase.from('invoices').select('id,total_minor,amount_paid_minor,customers(full_name)').eq('status', 'OVERDUE').order('created_at', { ascending: false }).limit(100),
       ]);
       const jobData = (jobs.data ?? []) as (JobCard & { vehicles: { registration_number: string } | null, customers: { full_name: string } | null })[];
       setRecentJobs(jobData.slice(0, 6));
@@ -609,8 +628,8 @@ function DashboardSection({ onNewJob, onNewCustomer, onNewSale, onReceiveStock, 
       const outOfStock = (parts.data ?? []).filter((p) => p.quantity_on_hand === 0);
       const outstanding = (invoices.data ?? []).reduce((s, inv) => s + (inv.total_minor - inv.amount_paid_minor), 0);
       const vehiclesPerWeek = new Set(((weekVehicleRows.data ?? []) as { vehicle_id: string }[]).map((r) => r.vehicle_id)).size;
-      const overdueRows = ((overdueInvoices.data ?? []) as unknown as { total_minor: number; amount_paid_minor: number; customers: { full_name: string } | null }[])
-        .map((inv) => ({ customer: inv.customers?.full_name ?? 'Customer', balance: inv.total_minor - inv.amount_paid_minor }))
+      const overdueRows = ((overdueInvoices.data ?? []) as unknown as { id: string; total_minor: number; amount_paid_minor: number; customers: { full_name: string } | null }[])
+        .map((inv) => ({ id: inv.id, customer: inv.customers?.full_name ?? 'Customer', balance: inv.total_minor - inv.amount_paid_minor }))
         .sort((a, b) => b.balance - a.balance);
       setWorstOverdue(overdueRows[0] ?? null);
       const [todaySales, weekSales, monthSales, recentSaleRows, saleItemRows] = await Promise.all([
@@ -657,21 +676,21 @@ function DashboardSection({ onNewJob, onNewCustomer, onNewSale, onReceiveStock, 
   return <>
     <div className="page-heading"><div><p className="eyebrow">{new Date().toLocaleDateString('en-KE', { weekday: 'long', day: 'numeric', month: 'long' })}</p><h1>{greetingForHour(new Date().getHours())}, {roleDisplayName(userPerms)}.</h1><p className="muted">Here&apos;s what&apos;s happening across the workshop today.</p></div><div className="heading-actions">{can('customer.create') && <button className="button secondary" onClick={onNewCustomer}><Plus size={16} /> Add customer</button>}{can('job.create') && <button className="button primary" onClick={onNewJob}><Plus size={17} /> New work order</button>}</div></div>
     <div className="metric-grid">
-      <Metric label="Active jobs" value={String(stats.activeJobs).padStart(2, '0')} trend="Across the workshop" icon={<Wrench />} tone="navy" />
-      <Metric label="Vehicles per week" value={String(stats.vehiclesPerWeek).padStart(2, '0')} trend="Distinct vehicles, last 7 days" icon={<CarFront />} tone="green" />
-      <Metric label="Sales for the month" value={formatKes(stats.monthSales)} trend="Since the 1st" icon={<Store />} tone="gold" />
-      <Metric label="Outstanding" value={formatKes(stats.outstandingInvoices)} trend="Unpaid invoices" icon={<CircleDollarSign />} tone="blue" />
+      <Metric label="Active jobs" value={String(stats.activeJobs).padStart(2, '0')} trend="Across the workshop" icon={<Wrench />} tone="navy" onClick={() => onNavigate('jobcards')} />
+      <Metric label="Vehicles per week" value={String(stats.vehiclesPerWeek).padStart(2, '0')} trend="Distinct vehicles, last 7 days" icon={<CarFront />} tone="green" onClick={() => onNavigate('vehicles')} />
+      <Metric label="Sales for the month" value={formatKes(stats.monthSales)} trend="Since the 1st" icon={<Store />} tone="gold" onClick={() => onNavigate('sales')} />
+      <Metric label="Outstanding" value={formatKes(stats.outstandingInvoices)} trend="Unpaid invoices" icon={<CircleDollarSign />} tone="blue" onClick={() => onNavigate('invoices')} />
     </div>
     <div className="dashboard-grid">
       <section className="panel jobs-panel">
         <div className="panel-heading"><div><p className="eyebrow">Workshop pulse</p><h3>Recent work orders</h3></div>{can('job.create') && <button className="text-button" onClick={onNewJob}>New work order <Plus size={15} /></button>}</div>
-        {recentJobs.length === 0 ? <Empty title="No active work orders" text="The workshop is currently clear." /> : <div className="job-list">{recentJobs.map((job) => <div className="job-row" key={job.id}><div className="job-icon"><Wrench size={17} /></div><div className="job-main"><strong>{job.job_number}</strong><span>{job.vehicles?.registration_number ?? 'Vehicle'} · {job.customers?.full_name ?? 'Customer'}</span></div><div className="job-complaint">{job.complaint}</div><span className={`status ${statusStyles[job.status] ?? 'bg-slate-100 text-slate-600'}`}>{job.status.replaceAll('_', ' ')}</span><ArrowUpRight className="row-arrow" size={17} /></div>)}</div>}
+        {recentJobs.length === 0 ? <Empty title="No active work orders" text="The workshop is currently clear." /> : <div className="job-list">{recentJobs.map((job) => <div className="job-row" key={job.id} onClick={() => onSelectJob(job.id)}><div className="job-icon"><Wrench size={17} /></div><div className="job-main"><strong>{job.job_number}</strong><span>{job.vehicles?.registration_number ?? 'Vehicle'} · {job.customers?.full_name ?? 'Customer'}</span></div><div className="job-complaint">{job.complaint}</div><span className={`status ${statusStyles[job.status] ?? 'bg-slate-100 text-slate-600'}`}>{job.status.replaceAll('_', ' ')}</span><ArrowUpRight className="row-arrow" size={17} /></div>)}</div>}
       </section>
       <section className="panel attention-panel">
         <div className="panel-heading"><div><p className="eyebrow">Needs attention</p><h3>Today&apos;s focus</h3></div><Sparkles size={18} className="gold-icon" /></div>
-        <div className="attention-item"><div className={`attention-number ${stats.lowStock > 0 ? 'amber' : ''}`}>{stats.lowStock}</div><div><strong>Low-stock parts</strong><span>{stats.lowStock > 0 ? 'Reorder needed' : 'Inventory levels are healthy'}</span></div><ArrowUpRight size={16} /></div>
-        <div className="attention-item"><div className={`attention-number ${stats.overdueCount > 0 ? 'red' : ''}`}>{stats.overdueCount}</div><div><strong>Overdue bad debts</strong><span>{worstOverdue ? `Most critical: ${worstOverdue.customer} · ${formatKes(worstOverdue.balance)}` : 'No overdue balances'}</span></div><ArrowUpRight size={16} /></div>
-        <div className="attention-item"><div className="attention-number">{stats.pendingQuotes}</div><div><strong>Pending quotations</strong><span>Awaiting customer approval</span></div><ArrowUpRight size={16} /></div>
+        <div className="attention-item clickable" onClick={() => onNavigate('lowstock')}><div className={`attention-number ${stats.lowStock > 0 ? 'amber' : ''}`}>{stats.lowStock}</div><div><strong>Low-stock parts</strong><span>{stats.lowStock > 0 ? 'Reorder needed' : 'Inventory levels are healthy'}</span></div><ArrowUpRight size={16} /></div>
+        <div className="attention-item clickable" onClick={() => worstOverdue ? onSelectInvoice(worstOverdue.id) : onNavigate('invoices')}><div className={`attention-number ${stats.overdueCount > 0 ? 'red' : ''}`}>{stats.overdueCount}</div><div><strong>Overdue bad debts</strong><span>{worstOverdue ? `Most critical: ${worstOverdue.customer} · ${formatKes(worstOverdue.balance)}` : 'No overdue balances'}</span></div><ArrowUpRight size={16} /></div>
+        <div className="attention-item clickable" onClick={() => onNavigate('quotations')}><div className="attention-number">{stats.pendingQuotes}</div><div><strong>Pending quotations</strong><span>Awaiting customer approval</span></div><ArrowUpRight size={16} /></div>
       </section>
     </div>
     <div className="dashboard-grid" style={{ marginTop: 28 }}>
@@ -682,7 +701,7 @@ function DashboardSection({ onNewJob, onNewCustomer, onNewSale, onReceiveStock, 
       </section>
       <section className="panel">
         <div className="panel-heading"><div><p className="eyebrow">Distribution</p><h3>Jobs by status</h3></div></div>
-        {jobStatusData.length === 0 ? <Empty title="No job data" text="Jobs will appear here." /> : <div className="status-list">{jobStatusData.map((s) => <div key={s.status} className="status-row"><span className={`status ${statusStyles[s.status] ?? ''}`}>{s.status.replaceAll('_', ' ')}</span><strong>{s.count}</strong></div>)}</div>}
+        {jobStatusData.length === 0 ? <Empty title="No job data" text="Jobs will appear here." /> : <div className="status-list">{jobStatusData.map((s) => <div key={s.status} className="status-row clickable" onClick={() => onNavigate('jobcards')}><span className={`status ${statusStyles[s.status] ?? ''}`}>{s.status.replaceAll('_', ' ')}</span><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><strong>{s.count}</strong><ChevronRight size={15} className="row-arrow" /></div></div>)}</div>}
       </section>
     </div>
     <DashboardFab items={fabItems} />
@@ -698,8 +717,8 @@ function DashboardFab({ items }: { items: { label: string; icon: React.ReactNode
   </div>;
 }
 
-function Metric({ label, value, trend, icon, tone }: { label: string; value: string; trend: string; icon: React.ReactNode; tone: string }) {
-  return <div className="metric-card"><div className={`metric-icon ${tone}`}>{icon}</div><div className="metric-copy"><span>{label}</span><strong>{value}</strong><small>{trend}</small></div><ArrowUpRight size={17} className="metric-arrow" /></div>;
+function Metric({ label, value, trend, icon, tone, onClick }: { label: string; value: string; trend: string; icon: React.ReactNode; tone: string; onClick: () => void }) {
+  return <button type="button" className="metric-card" style={{ textAlign: 'left' }} onClick={onClick}><div className={`metric-icon ${tone}`}>{icon}</div><div className="metric-copy"><span>{label}</span><strong>{value}</strong><small>{trend}</small></div><ArrowUpRight size={17} className="metric-arrow" /></button>;
 }
 
 // === CUSTOMERS ===
@@ -1515,7 +1534,7 @@ function ServicesSection({ onNew, can }: { onNew: () => void; can: (p: string) =
 }
 
 // === TECHNICIANS ===
-function TechniciansSection({ onNew, can }: { onNew: () => void; can: (p: string) => boolean }) {
+function TechniciansSection({ onNew, onSelect, can }: { onNew: () => void; onSelect: (id: string) => void; can: (p: string) => boolean }) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [assignments, setAssignments] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -1535,8 +1554,63 @@ function TechniciansSection({ onNew, can }: { onNew: () => void; can: (p: string
     })();
   }, []);
   return <SectionPanel eyebrow="Workshop team" title="Technicians" onNew={can('users.manage') ? onNew : undefined} newLabel="Add technician">
-    {loading ? <Loading /> : employees.length === 0 ? <Empty title="No technicians" text="Add your first technician to the workshop team." /> : <div className="data-table">{employees.map((e) => <div className="table-row" key={e.id}><div className="avatar small-avatar">{e.full_name.slice(0, 1)}</div><div><strong>{e.full_name}</strong><span>{e.specialization ?? 'General mechanic'}</span></div><span className="table-muted">{e.phone ?? '—'}</span><span className="status bg-blue-50 text-blue-700">{assignments[e.id] ?? 0} active</span></div>)}</div>}
+    {loading ? <Loading /> : employees.length === 0 ? <Empty title="No technicians" text="Add your first technician to the workshop team." /> : <div className="data-table">{employees.map((e) => <div className="table-row clickable" key={e.id} onClick={() => onSelect(e.id)}><div className="avatar small-avatar">{e.full_name.slice(0, 1)}</div><div><strong>{e.full_name}</strong><span>{e.specialization ?? 'General mechanic'}</span></div><span className="table-muted">{e.phone ?? '—'}</span><span className="status bg-blue-50 text-blue-700">{assignments[e.id] ?? 0} active</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
   </SectionPanel>;
+}
+
+type TechnicianJobRow = {
+  job_card_id: string; signed_at: string;
+  job_cards: { job_number: string; status: string; created_at: string; complaint: string; invoices: { invoice_number: string; total_minor: number; amount_paid_minor: number; status: string }[] } | null;
+};
+
+function TechnicianDetail({ id, onBack }: { id: string; onBack: () => void }) {
+  const [employee, setEmployee] = useState<Employee | null>(null);
+  const [jobs, setJobs] = useState<TechnicianJobRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const { data: emp } = await supabase.from('employees').select('*').eq('id', id).maybeSingle();
+      const employeeRow = emp as Employee | null;
+      setEmployee(employeeRow);
+      if (employeeRow) {
+        const { data } = await supabase.from('job_card_signoffs').select('job_card_id, signed_at, job_cards(job_number, status, created_at, complaint, invoices(invoice_number, total_minor, amount_paid_minor, status))').eq('role', 'TECHNICIAN').eq('name', employeeRow.full_name).order('signed_at', { ascending: false });
+        setJobs((data ?? []) as unknown as TechnicianJobRow[]);
+      }
+      setLoading(false);
+    })();
+  }, [id]);
+
+  if (loading) return <Loading />;
+  if (!employee) return <Empty title="Technician not found" text="This technician may have been removed." />;
+
+  const revenueOf = (row: TechnicianJobRow) => (row.job_cards?.invoices ?? []).filter((inv) => inv.status !== 'VOID').reduce((s, inv) => s + inv.total_minor, 0);
+  const collectedOf = (row: TechnicianJobRow) => (row.job_cards?.invoices ?? []).filter((inv) => inv.status !== 'VOID').reduce((s, inv) => s + inv.amount_paid_minor, 0);
+  const totalRevenue = jobs.reduce((s, row) => s + revenueOf(row), 0);
+  const totalCollected = jobs.reduce((s, row) => s + collectedOf(row), 0);
+  const completedCount = jobs.filter((row) => row.job_cards?.status === 'COMPLETED').length;
+
+  return <>
+    <BackBar onBack={onBack} label="Technicians" />
+    <div className="detail-header"><div className="detail-avatar"><UserCog size={24} /></div><div className="flex-1"><h2>{employee.full_name}</h2><p className="muted">{employee.specialization ?? 'General mechanic'} · {employee.phone ?? 'No phone on file'}</p></div></div>
+    <div className="detail-info-grid">
+      <div className="info-card"><ClipboardList size={16} /> <div><span>Jobs handled</span><strong>{jobs.length}</strong></div></div>
+      <div className="info-card"><CheckCircle2 size={16} /> <div><span>Completed</span><strong>{completedCount}</strong></div></div>
+      <div className="info-card"><CircleDollarSign size={16} /> <div><span>Revenue generated</span><strong>{formatKes(totalRevenue)}</strong></div></div>
+      <div className="info-card"><Banknote size={16} /> <div><span>Collected</span><strong>{formatKes(totalCollected)}</strong></div></div>
+    </div>
+    <section className="panel" style={{ marginTop: 20 }}>
+      <div className="panel-heading"><div><p className="eyebrow">History</p><h3>Work orders</h3></div></div>
+      {jobs.length === 0 ? <Empty title="No work orders yet" text="Work orders this technician is assigned to will appear here." /> : <div className="data-table">{jobs.map((row) => <div className="table-row" key={row.job_card_id}>
+        <div className="job-icon"><Wrench size={17} /></div>
+        <div><strong>{row.job_cards?.job_number ?? '—'}</strong><span>{row.job_cards?.complaint ?? ''}</span></div>
+        <span className="table-muted">{row.job_cards ? formatDate(row.job_cards.created_at) : '—'}</span>
+        <span className="table-muted">{revenueOf(row) > 0 ? formatKes(revenueOf(row)) : 'Not invoiced'}</span>
+        {row.job_cards && <span className={`status ${statusStyles[row.job_cards.status] ?? ''}`}>{row.job_cards.status.replaceAll('_', ' ')}</span>}
+      </div>)}</div>}
+    </section>
+  </>;
 }
 
 // === PARTS / INVENTORY ===
@@ -1777,7 +1851,7 @@ function suggestedOrderQty(p: Part): number {
   return Math.max(p.reorder_level * 2 - p.quantity_on_hand, p.reorder_level, 1);
 }
 
-function LowStockSection({ onSelect }: { onSelect: (id: string) => void }) {
+function LowStockSection({ onSelect, onNotice, can, onNavigateToPO }: { onSelect: (id: string) => void; onNotice: (m: string) => void; can: (p: string) => boolean; onNavigateToPO: (id: string) => void }) {
   const [parts, setParts] = useState<LowStockPart[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -1785,6 +1859,7 @@ function LowStockSection({ onSelect }: { onSelect: (id: string) => void }) {
   const [highlight, setHighlight] = useState(0);
   const [orderQty, setOrderQty] = useState<Record<string, number>>({});
   const [showPrint, setShowPrint] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
     supabase.from('parts').select('*, suppliers(name)').eq('active', true).order('name').then(({ data }) => {
@@ -1829,8 +1904,40 @@ function LowStockSection({ onSelect }: { onSelect: (id: string) => void }) {
     })));
   }
 
+  async function generateOrders() {
+    setGenerating(true);
+    const bySupplierId = new Map<string, LowStockPart[]>();
+    const unassigned: LowStockPart[] = [];
+    for (const p of parts) {
+      if (!p.supplier_id) { unassigned.push(p); continue; }
+      if (!bySupplierId.has(p.supplier_id)) bySupplierId.set(p.supplier_id, []);
+      bySupplierId.get(p.supplier_id)!.push(p);
+    }
+    const created: { id: string; po_number: string }[] = [];
+    const failedSuppliers: string[] = [];
+    for (const [supplierId, items] of Array.from(bySupplierId.entries())) {
+      const { data, error } = await supabase.rpc('create_purchase_order', {
+        p_supplier_id: supplierId,
+        p_order_date: localDateStr(),
+        p_expected_delivery: null,
+        p_items: items.map((p) => ({ part_id: p.id, quantity: orderQty[p.id] ?? 1, unit_cost_minor: p.cost_price_minor })),
+      });
+      if (error || !data) failedSuppliers.push(items[0].suppliers?.name ?? 'Supplier');
+      else created.push(data as { id: string; po_number: string });
+    }
+    setGenerating(false);
+    const messages: string[] = [];
+    if (created.length > 0) messages.push(`Created ${created.length} purchase order${created.length === 1 ? '' : 's'}: ${created.map((c) => c.po_number).join(', ')}.`);
+    if (failedSuppliers.length > 0) messages.push(`Unable to create an order for ${failedSuppliers.join(', ')}.`);
+    if (unassigned.length > 0) messages.push(`${unassigned.length} part${unassigned.length === 1 ? '' : 's'} skipped — no supplier assigned.`);
+    onNotice(messages.join(' ') || 'No purchase orders were created.');
+    if (created.length === 1) onNavigateToPO(created[0].id);
+  }
+
+  const orderableCount = parts.filter((p) => p.supplier_id).length;
+
   return <>
-    <div className="page-heading"><div><p className="eyebrow">Reorder alerts</p><h1>Low Stock</h1><p className="muted">Parts at or below their reorder level, with a ready-to-send suggested order.</p></div><div className="heading-actions"><button className="button secondary" onClick={exportExcel} disabled={parts.length === 0}><Download size={16} /> Export Excel</button><button className="button primary" onClick={() => setShowPrint(true)} disabled={parts.length === 0}><Printer size={16} /> Export PDF</button></div></div>
+    <div className="page-heading"><div><p className="eyebrow">Reorder alerts</p><h1>Low Stock</h1><p className="muted">Parts at or below their reorder level, with a ready-to-send suggested order.</p></div><div className="heading-actions"><button className="button secondary" onClick={exportExcel} disabled={parts.length === 0}><Download size={16} /> Export Excel</button><button className="button secondary" onClick={() => setShowPrint(true)} disabled={parts.length === 0}><Printer size={16} /> Export PDF</button>{can('purchase_order.create') && <button className="button primary" onClick={() => void generateOrders()} disabled={generating || orderableCount === 0}><ShoppingCart size={16} /> {generating ? 'Generating…' : 'Generate purchase orders'}</button>}</div></div>
 
     <div className="combobox" style={{ marginBottom: 16 }}>
       <Search size={16} className="combobox-search-icon" />
@@ -1973,11 +2080,25 @@ function ProcurementSection({ onNew, onSelect, can }: { onNew: () => void; onSel
   </SectionPanel>;
 }
 
+type PODetailData = PurchaseOrder & { suppliers: Supplier | null; purchase_order_items: (PurchaseOrderItem & { parts: Part | null })[] };
+
 function PODetail({ id, onBack, can, onNotice }: { id: string; onBack: () => void; can: (p: string) => boolean; onNotice: (m: string) => void }) {
-  const [po, setPO] = useState<(PurchaseOrder & { suppliers: Supplier | null; purchase_order_items: (PurchaseOrderItem & { parts: Part | null })[] }) | null>(null);
+  const [po, setPO] = useState<PODetailData | null>(null);
   const [receiveQty, setReceiveQty] = useState<Record<string, string>>({});
   const [receivingId, setReceivingId] = useState<string | null>(null);
-  useEffect(() => { supabase.from('purchase_orders').select('*, suppliers(*), purchase_order_items(*, parts(*))').eq('id', id).maybeSingle().then(({ data }) => setPO(data as (PurchaseOrder & { suppliers: Supplier | null; purchase_order_items: (PurchaseOrderItem & { parts: Part | null })[] }) | null)); }, [id]);
+  const [editMode, setEditMode] = useState(false);
+  const [editQty, setEditQty] = useState<Record<string, string>>({});
+  const [editCost, setEditCost] = useState<Record<string, string>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [availableParts, setAvailableParts] = useState<Part[]>([]);
+  const [pickPartId, setPickPartId] = useState(''); const [pickQty, setPickQty] = useState('1'); const [pickCost, setPickCost] = useState('0');
+  const [showPrint, setShowPrint] = useState(false);
+
+  async function reload() { const { data } = await supabase.from('purchase_orders').select('*, suppliers(*), purchase_order_items(*, parts(*))').eq('id', id).maybeSingle(); setPO(data as PODetailData | null); }
+  useEffect(() => { void reload(); }, [id]);
+
+  const editable = po?.status === 'DRAFT' && can('settings.manage');
+  useEffect(() => { if (editable) supabase.from('parts').select('*').eq('active', true).order('name').limit(500).then(({ data }) => setAvailableParts((data ?? []) as Part[])); }, [editable]);
 
   async function receiveGoods(itemId: string, unitCost: number) {
     const qty = parseInt(receiveQty[itemId] ?? '0');
@@ -1987,14 +2108,55 @@ function PODetail({ id, onBack, can, onNotice }: { id: string; onBack: () => voi
     setReceivingId(null);
     if (error) { onNotice(error.message.includes('more than the ordered') ? 'Cannot receive more than the ordered quantity.' : 'Unable to receive goods. Please try again.'); return; }
     setReceiveQty((prev) => ({ ...prev, [itemId]: '' }));
-    onNotice(`${qty} units received into inventory.`); reload();
+    onNotice(`${qty} units received into inventory.`); void reload();
   }
 
-  async function reload() { supabase.from('purchase_orders').select('*, suppliers(*), purchase_order_items(*, parts(*))').eq('id', id).maybeSingle().then(({ data }) => setPO(data as typeof po)); }
+  async function saveItem(item: PurchaseOrderItem) {
+    if (!po) return;
+    const qty = Math.max(1, parseInt(editQty[item.id] ?? String(item.quantity_ordered)) || 1);
+    const cost = Math.max(0, Math.round((parseFloat(editCost[item.id] ?? String(item.unit_cost_minor / 100)) || 0) * 100));
+    if (qty < item.quantity_received) { onNotice(`Cannot set ordered quantity below the ${item.quantity_received} already received.`); return; }
+    setSavingId(item.id);
+    const lineTotal = qty * cost;
+    const { error } = await supabase.from('purchase_order_items').update({ quantity_ordered: qty, unit_cost_minor: cost, line_total_minor: lineTotal }).eq('id', item.id);
+    if (!error) {
+      const total = po.purchase_order_items.reduce((s, i) => s + (i.id === item.id ? lineTotal : i.line_total_minor), 0);
+      await supabase.from('purchase_orders').update({ total_minor: total }).eq('id', po.id);
+    }
+    setSavingId(null);
+    if (error) { onNotice('Unable to update the line item.'); return; }
+    onNotice('Line item updated.'); void reload();
+  }
+
+  async function removeItem(itemId: string) {
+    if (!po) return;
+    const { error } = await supabase.from('purchase_order_items').delete().eq('id', itemId);
+    if (error) { onNotice('Unable to remove the line item.'); return; }
+    const total = po.purchase_order_items.filter((i) => i.id !== itemId).reduce((s, i) => s + i.line_total_minor, 0);
+    await supabase.from('purchase_orders').update({ total_minor: total }).eq('id', po.id);
+    onNotice('Line item removed.'); void reload();
+  }
+
+  async function addPart() {
+    if (!po) return;
+    const part = availableParts.find((x) => x.id === pickPartId); if (!part) return;
+    const qty = Math.max(1, parseInt(pickQty) || 1); const cost = Math.max(0, Math.round((parseFloat(pickCost) || 0) * 100));
+    const { error } = await supabase.from('purchase_order_items').insert({ purchase_order_id: po.id, part_id: part.id, quantity_ordered: qty, unit_cost_minor: cost, line_total_minor: qty * cost });
+    if (error) { onNotice('Unable to add the part to this order.'); return; }
+    const total = po.purchase_order_items.reduce((s, i) => s + i.line_total_minor, 0) + qty * cost;
+    await supabase.from('purchase_orders').update({ total_minor: total }).eq('id', po.id);
+    setPickPartId(''); setPickQty('1'); setPickCost('0');
+    onNotice('Part added to order.'); void reload();
+  }
+
   if (!po) return <Loading />;
   return <>
     <BackBar onBack={onBack} label="Procurement" />
     <div className="detail-header"><div className="detail-avatar po"><ShoppingCart size={24} /></div><div className="flex-1"><h2>{po.po_number}</h2><p className="muted">{po.suppliers?.name ?? 'Supplier'} · {formatDate(po.order_date)}</p></div><span className={`status ${statusStyles[po.status] ?? ''}`}>{po.status.replaceAll('_', ' ')}</span></div>
+    <div className="action-buttons" style={{ marginBottom: 16 }}>
+      <button className="button secondary small" onClick={() => setShowPrint(true)}><Printer size={15} /> Export PDF</button>
+      {editable && <button className={`button ${editMode ? 'primary' : 'secondary'} small`} onClick={() => setEditMode((v) => !v)}><Edit size={15} /> {editMode ? 'Done editing' : 'Edit order'}</button>}
+    </div>
     <div className="detail-info-grid">
       <div className="info-card"><Calendar size={16} /> <div><span>Order date</span><strong>{formatDate(po.order_date)}</strong></div></div>
       {po.expected_delivery && <div className="info-card"><Truck size={16} /> <div><span>Expected</span><strong>{formatDate(po.expected_delivery)}</strong></div></div>}
@@ -2005,11 +2167,61 @@ function PODetail({ id, onBack, can, onNotice }: { id: string; onBack: () => voi
       {po.purchase_order_items.length === 0 ? <Empty title="No items" text="This PO has no line items." /> : <div className="data-table">{po.purchase_order_items.map((item) => <div className="table-row" key={item.id}>
         <div className="job-icon"><Package size={17} /></div>
         <div><strong>{item.parts?.name ?? 'Part'}</strong><span>Ordered: {item.quantity_ordered} · Received: {item.quantity_received}</span></div>
-        <span className="table-muted">{formatKes(item.unit_cost_minor)} each</span>
-        {can('inventory.receive') && item.quantity_received < item.quantity_ordered && <div className="receive-row"><input type="number" min="1" max={item.quantity_ordered - item.quantity_received} placeholder="Qty" value={receiveQty[item.id] ?? ''} onChange={(e) => setReceiveQty({ ...receiveQty, [item.id]: e.target.value })} disabled={receivingId === item.id} /><button className="button primary small" disabled={receivingId === item.id} onClick={() => void receiveGoods(item.id, item.unit_cost_minor)}>{receivingId === item.id ? 'Receiving...' : 'Receive'}</button></div>}
+        {editMode ? <>
+          <input type="number" min={item.quantity_received || 1} value={editQty[item.id] ?? item.quantity_ordered} onChange={(e) => setEditQty((prev) => ({ ...prev, [item.id]: e.target.value }))} style={{ width: 70, border: '1px solid #dfe5ea', borderRadius: 6, padding: '6px 8px', fontSize: 12, textAlign: 'right' }} />
+          <input type="number" min="0" step="0.01" value={editCost[item.id] ?? (item.unit_cost_minor / 100)} onChange={(e) => setEditCost((prev) => ({ ...prev, [item.id]: e.target.value }))} style={{ width: 90, border: '1px solid #dfe5ea', borderRadius: 6, padding: '6px 8px', fontSize: 12, textAlign: 'right' }} />
+          <button className="button secondary small" disabled={savingId === item.id} onClick={() => void saveItem(item)}>Save</button>
+          <button className="close-button" style={{ width: 28, height: 28 }} onClick={() => void removeItem(item.id)}><X size={14} /></button>
+        </> : <>
+          <span className="table-muted">{formatKes(item.unit_cost_minor)} each</span>
+          {can('inventory.receive') && item.quantity_received < item.quantity_ordered && <div className="receive-row"><input type="number" min="1" max={item.quantity_ordered - item.quantity_received} placeholder="Qty" value={receiveQty[item.id] ?? ''} onChange={(e) => setReceiveQty({ ...receiveQty, [item.id]: e.target.value })} disabled={receivingId === item.id} /><button className="button primary small" disabled={receivingId === item.id} onClick={() => void receiveGoods(item.id, item.unit_cost_minor)}>{receivingId === item.id ? 'Receiving...' : 'Receive'}</button></div>}
+        </>}
       </div>)}</div>}
+      {editMode && <div className="form-row" style={{ gridTemplateColumns: '1fr 80px 120px auto', alignItems: 'end', marginTop: 16 }}>
+        <label>Part<select value={pickPartId} onChange={(e) => { const part = availableParts.find((x) => x.id === e.target.value); setPickPartId(e.target.value); if (part) setPickCost((part.cost_price_minor / 100).toString()); }}><option value="">Select part...</option>{availableParts.map((part) => <option key={part.id} value={part.id}>{part.name} ({part.sku})</option>)}</select></label>
+        <label>Qty<input type="number" min="1" value={pickQty} onChange={(e) => setPickQty(e.target.value)} /></label>
+        <label>Unit cost (KES)<input type="number" min="0" step="0.01" value={pickCost} onChange={(e) => setPickCost(e.target.value)} /></label>
+        <button type="button" className="button secondary" disabled={!pickPartId} onClick={() => void addPart()}><Plus size={15} /> Add</button>
+      </div>}
     </section>
+    {showPrint && <POPrintView po={po} onClose={() => setShowPrint(false)} />}
   </>;
+}
+
+function POPrintView({ po, onClose }: { po: PODetailData; onClose: () => void }) {
+  return <div className="print-overlay">
+    <div className="print-toolbar no-print">
+      <strong>{po.po_number}</strong>
+      <div className="action-buttons">
+        <button className="button primary small" onClick={() => window.print()}><Printer size={15} /> Print / Save as PDF</button>
+        <button className="close-button" onClick={onClose}><X size={16} /></button>
+      </div>
+    </div>
+    <div id="print-area" className="print-sheet">
+      <div className="print-header">
+        <div><img src="/logo.png" alt="Oakland Motor Care Ltd" /><h1>Oakland Motor Care Ltd.</h1><p className="muted">Purchase Order</p></div>
+        <div style={{ textAlign: 'right' }}>
+          <p className="print-field"><span>PO Number</span><strong>{po.po_number}</strong></p>
+          <p className="print-field"><span>Order date</span><strong>{formatDate(po.order_date)}</strong></p>
+          {po.expected_delivery && <p className="print-field"><span>Expected delivery</span><strong>{formatDate(po.expected_delivery)}</strong></p>}
+        </div>
+      </div>
+      <div className="print-section">
+        <h4>Supplier</h4>
+        <p className="print-field"><strong>{po.suppliers?.name ?? '—'}</strong></p>
+        {po.suppliers?.contact_person && <p className="print-field"><span>Contact</span><strong>{po.suppliers.contact_person}</strong></p>}
+        {po.suppliers?.phone && <p className="print-field"><span>Phone</span><strong>{po.suppliers.phone}</strong></p>}
+        {po.suppliers?.email && <p className="print-field"><span>Email</span><strong>{po.suppliers.email}</strong></p>}
+      </div>
+      <div className="print-section">
+        <h4>Items</h4>
+        <table className="print-table"><thead><tr><th>Part Name</th><th>Part Number</th><th>Qty</th><th>Unit Cost</th><th>Total</th></tr></thead>
+          <tbody>{po.purchase_order_items.map((item) => <tr key={item.id}><td>{item.parts?.name ?? 'Part'}</td><td>{item.parts?.sku ?? '—'}</td><td>{item.quantity_ordered}</td><td>{formatKes(item.unit_cost_minor)}</td><td>{formatKes(item.line_total_minor)}</td></tr>)}</tbody>
+        </table>
+      </div>
+      <div className="print-totals"><table><tbody><tr><td><strong>Total</strong></td><td><strong>{formatKes(po.total_minor)}</strong></td></tr></tbody></table></div>
+    </div>
+  </div>;
 }
 
 // === QUOTATIONS ===
@@ -2106,23 +2318,89 @@ function InvoiceDetail({ id, onBack, onPayment, can }: { id: string; onBack: () 
 }
 
 // === PAYMENTS ===
-function PaymentsSection() {
-  const [payments, setPayments] = useState<(Payment & { invoices: { invoice_number: string; job_cards: { job_number: string } | null } | null })[]>([]);
+type PaymentWithDetail = Payment & { invoices: { invoice_number: string; customers: { full_name: string } | null; job_cards: { job_number: string } | null } | null };
+
+function PaymentsSection({ onNotice }: { onNotice: (m: string) => void }) {
+  const [payments, setPayments] = useState<PaymentWithDetail[]>([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { supabase.from('payments').select('*, invoices(invoice_number, job_cards(job_number))').order('paid_at', { ascending: false }).limit(100).then(({ data }) => { setPayments((data ?? []) as (Payment & { invoices: { invoice_number: string; job_cards: { job_number: string } | null } | null })[]); setLoading(false); }); }, []);
-  return <SectionPanel eyebrow="Transaction log" title="Payments">
-    {loading ? <Loading /> : payments.length === 0 ? <Empty title="No payments recorded" text="Payments will appear here once invoices are paid." /> : <div className="data-table">{payments.map((p) => <div className="table-row" key={p.id}><div className="job-icon"><Banknote size={17} /></div><div><strong>{formatKes(p.amount_minor)}</strong><span>{p.invoices?.invoice_number ?? 'Invoice'} · Work Order {p.invoices?.job_cards?.job_number ?? '—'} · {p.method}</span></div><span className="table-muted">{formatDate(p.paid_at)}</span><span className="table-muted">{p.reference ?? '—'}</span></div>)}</div>}
+  const [selected, setSelected] = useState<PaymentWithDetail | null>(null);
+  const [exporting, setExporting] = useState(false);
+  useEffect(() => { supabase.from('payments').select('*, invoices(invoice_number, customers(full_name), job_cards(job_number))').order('paid_at', { ascending: false }).limit(100).then(({ data }) => { setPayments((data ?? []) as PaymentWithDetail[]); setLoading(false); }); }, []);
+
+  async function exportCSV() {
+    setExporting(true);
+    const { data, error } = await supabase.from('payments').select('*, invoices(invoice_number, customers(full_name), job_cards(job_number))').order('paid_at', { ascending: false });
+    setExporting(false);
+    if (error) { onNotice('Unable to export payments. Please try again.'); return; }
+    const rows = (data ?? []) as PaymentWithDetail[];
+    if (rows.length === 0) { onNotice('There are no payments to export.'); return; }
+    downloadCSV(`Oakland_Payments_${new Date().toISOString().slice(0, 10)}.csv`, rows.map((p) => ({
+      'Date': formatDateTime(p.paid_at),
+      'Amount (KES)': (p.amount_minor / 100).toFixed(2),
+      'Method': p.method,
+      'Reference': p.reference ?? '',
+      'Customer': p.invoices?.customers?.full_name ?? '',
+      'Invoice': p.invoices?.invoice_number ?? '',
+      'Work Order': p.invoices?.job_cards?.job_number ?? '',
+      'Notes': p.notes ?? '',
+    })));
+  }
+
+  return <SectionPanel eyebrow="Transaction log" title="Payments" extra={<button className="button secondary small" disabled={exporting} onClick={() => void exportCSV()}><Download size={15} /> {exporting ? 'Exporting…' : 'Export CSV'}</button>}>
+    {loading ? <Loading /> : payments.length === 0 ? <Empty title="No payments recorded" text="Payments will appear here once invoices are paid." /> : <div className="data-table">{payments.map((p) => <div className="table-row clickable" key={p.id} onClick={() => setSelected(p)}><div className="job-icon"><Banknote size={17} /></div><div><strong>{formatKes(p.amount_minor)}</strong><span>{p.invoices?.invoice_number ?? 'Invoice'} · Work Order {p.invoices?.job_cards?.job_number ?? '—'} · {p.method}</span></div><span className="table-muted">{formatDate(p.paid_at)}</span><span className="table-muted">{p.reference ?? '—'}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
+    {selected && <PaymentDetailModal payment={selected} onClose={() => setSelected(null)} />}
   </SectionPanel>;
+}
+
+function PaymentDetailModal({ payment, onClose }: { payment: PaymentWithDetail; onClose: () => void }) {
+  return <Modal title={`Payment · ${formatKes(payment.amount_minor)}`} onClose={onClose}>
+    <div className="detail-info-grid">
+      <div className="info-card"><Banknote size={16} /><div><span>Amount</span><strong>{formatKes(payment.amount_minor)}</strong></div></div>
+      <div className="info-card"><Smartphone size={16} /><div><span>Method</span><strong>{payment.method}</strong></div></div>
+      <div className="info-card"><Calendar size={16} /><div><span>Paid at</span><strong>{formatDateTime(payment.paid_at)}</strong></div></div>
+      <div className="info-card"><ScrollText size={16} /><div><span>Reference</span><strong>{payment.reference ?? '—'}</strong></div></div>
+    </div>
+    <div className="detail-info-grid" style={{ marginTop: 16 }}>
+      <div className="info-card"><Users size={16} /><div><span>Customer</span><strong>{payment.invoices?.customers?.full_name ?? '—'}</strong></div></div>
+      <div className="info-card"><CircleDollarSign size={16} /><div><span>Invoice</span><strong>{payment.invoices?.invoice_number ?? '—'}</strong></div></div>
+      <div className="info-card"><ClipboardList size={16} /><div><span>Work order</span><strong>{payment.invoices?.job_cards?.job_number ?? '—'}</strong></div></div>
+    </div>
+    {payment.notes && <div className="info-card" style={{ marginTop: 16 }}><FileText size={16} /><div><span>Notes</span><strong>{payment.notes}</strong></div></div>}
+  </Modal>;
 }
 
 type ReceiptPayment = Payment & { invoices: { invoice_number: string; total_minor: number; amount_paid_minor: number; customers: { full_name: string } | null; job_cards: { job_number: string } | null } | null };
 
-function ReceiptsSection() {
+function ReceiptsSection({ onNotice }: { onNotice: (m: string) => void }) {
   const [payments, setPayments] = useState<ReceiptPayment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<ReceiptPayment | null>(null);
+  const [exporting, setExporting] = useState(false);
   useEffect(() => { supabase.from('payments').select('*, invoices(invoice_number, total_minor, amount_paid_minor, customers(full_name), job_cards(job_number))').order('paid_at', { ascending: false }).limit(50).then(({ data }) => { setPayments((data ?? []) as ReceiptPayment[]); setLoading(false); }); }, []);
-  return <SectionPanel eyebrow="Proof of payment" title="Receipts">
-    {loading ? <Loading /> : payments.length === 0 ? <Empty title="No receipts" text="Receipts are generated when payments are recorded." /> : <div className="data-table">{payments.map((p) => <div className="table-row" key={p.id}><div className="job-icon"><Receipt size={17} /></div><div><strong>RCP-{p.id.slice(-6).toUpperCase()}</strong><span>{p.invoices?.customers?.full_name ?? 'Customer'} · {p.invoices?.invoice_number ?? 'Invoice'} · Work Order {p.invoices?.job_cards?.job_number ?? '—'}</span></div><span className="table-muted">{formatKes(p.amount_minor)}</span><span className="status bg-emerald-50 text-emerald-700">{p.method}</span></div>)}</div>}
+
+  async function exportCSV() {
+    setExporting(true);
+    const { data, error } = await supabase.from('payments').select('*, invoices(invoice_number, total_minor, amount_paid_minor, customers(full_name), job_cards(job_number))').order('paid_at', { ascending: false });
+    setExporting(false);
+    if (error) { onNotice('Unable to export receipts. Please try again.'); return; }
+    const rows = (data ?? []) as ReceiptPayment[];
+    if (rows.length === 0) { onNotice('There are no receipts to export.'); return; }
+    downloadCSV(`Oakland_Receipts_${new Date().toISOString().slice(0, 10)}.csv`, rows.map((p) => ({
+      'Receipt No': `RCP-${p.id.slice(-6).toUpperCase()}`,
+      'Date': formatDateTime(p.paid_at),
+      'Customer': p.invoices?.customers?.full_name ?? '',
+      'Invoice': p.invoices?.invoice_number ?? '',
+      'Work Order': p.invoices?.job_cards?.job_number ?? '',
+      'Amount (KES)': (p.amount_minor / 100).toFixed(2),
+      'Method': p.method,
+      'Reference': p.reference ?? '',
+      'Notes': p.notes ?? '',
+    })));
+  }
+
+  return <SectionPanel eyebrow="Proof of payment" title="Receipts" extra={<button className="button secondary small" disabled={exporting} onClick={() => void exportCSV()}><Download size={15} /> {exporting ? 'Exporting…' : 'Export CSV'}</button>}>
+    {loading ? <Loading /> : payments.length === 0 ? <Empty title="No receipts" text="Receipts are generated when payments are recorded." /> : <div className="data-table">{payments.map((p) => <div className="table-row clickable" key={p.id} onClick={() => setSelected(p)}><div className="job-icon"><Receipt size={17} /></div><div><strong>RCP-{p.id.slice(-6).toUpperCase()}</strong><span>{p.invoices?.customers?.full_name ?? 'Customer'} · {p.invoices?.invoice_number ?? 'Invoice'} · Work Order {p.invoices?.job_cards?.job_number ?? '—'}</span></div><span className="table-muted">{formatKes(p.amount_minor)}</span><span className="status bg-emerald-50 text-emerald-700">{p.method}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
+    {selected && <PaymentDetailModal payment={selected} onClose={() => setSelected(null)} />}
   </SectionPanel>;
 }
 
@@ -2139,6 +2417,7 @@ const REPORT_ROW_LIMIT = 2000;
 const REPORT_TYPES = [
   { id: 'operations', label: 'Operations', icon: <ClipboardList size={16} /> },
   { id: 'financial', label: 'Financial', icon: <CircleDollarSign size={16} /> },
+  { id: 'sales', label: 'Sales', icon: <Receipt size={16} /> },
   { id: 'inventory', label: 'Inventory', icon: <Package size={16} /> },
   { id: 'procurement', label: 'Procurement', icon: <ShoppingCart size={16} /> },
   { id: 'technician', label: 'Technician', icon: <UserCog size={16} /> },
@@ -2166,6 +2445,17 @@ const REPORT_COLUMNS: Record<string, ReportColumn[]> = {
     { key: 'total_minor', label: 'Total', numeric: true, render: (r) => formatKes(r.total_minor as number), csv: (r) => (((r.total_minor as number) ?? 0) / 100).toFixed(2) },
     { key: 'amount_paid_minor', label: 'Paid', numeric: true, render: (r) => formatKes(r.amount_paid_minor as number), csv: (r) => (((r.amount_paid_minor as number) ?? 0) / 100).toFixed(2) },
     { key: 'balance', label: 'Balance', numeric: true, render: (r) => formatKes((r.total_minor as number) - (r.amount_paid_minor as number)), csv: (r) => (((r.total_minor as number) - (r.amount_paid_minor as number)) / 100).toFixed(2) },
+    { key: 'status', label: 'Status', render: (r) => reportStatusPill(r.status), csv: (r) => String(r.status ?? '') },
+  ],
+  sales: [
+    { key: 'sale_number', label: 'Sale Number', render: (r) => String(r.sale_number ?? '—'), csv: (r) => String(r.sale_number ?? '') },
+    { key: 'sale_date', label: 'Date', render: (r) => formatDate(r.sale_date as string), csv: (r) => String(r.sale_date ?? '') },
+    { key: 'customer_name', label: 'Customer', render: (r) => String(r.customer_name ?? 'Walk-in'), csv: (r) => String(r.customer_name ?? '') },
+    { key: 'salesperson_name', label: 'Salesperson', render: (r) => String(r.salesperson_name ?? '—'), csv: (r) => String(r.salesperson_name ?? '') },
+    { key: 'payment_method', label: 'Payment Method', render: (r) => String(r.payment_method ?? '—'), csv: (r) => String(r.payment_method ?? '') },
+    { key: 'total_minor', label: 'Total', numeric: true, render: (r) => formatKes(r.total_minor as number), csv: (r) => (((r.total_minor as number) ?? 0) / 100).toFixed(2) },
+    { key: 'amount_paid_minor', label: 'Paid', numeric: true, render: (r) => formatKes(r.amount_paid_minor as number), csv: (r) => (((r.amount_paid_minor as number) ?? 0) / 100).toFixed(2) },
+    { key: 'balance_minor', label: 'Balance', numeric: true, render: (r) => formatKes(r.balance_minor as number), csv: (r) => (((r.balance_minor as number) ?? 0) / 100).toFixed(2) },
     { key: 'status', label: 'Status', render: (r) => reportStatusPill(r.status), csv: (r) => String(r.status ?? '') },
   ],
   inventory: [
@@ -2224,6 +2514,18 @@ function computeReportKpis(type: string, rows: ReportRow[]): ReportKpi[] {
       { label: 'Overdue invoices', value: String(overdue), icon: <Clock size={17} />, tone: 'red' },
     ];
   }
+  if (type === 'sales') {
+    const active = rows.filter((r) => r.status !== 'VOIDED');
+    const totalRevenue = active.reduce((s, r) => s + ((r.total_minor as number) ?? 0), 0);
+    const totalCollected = active.reduce((s, r) => s + ((r.amount_paid_minor as number) ?? 0), 0);
+    const voided = rows.filter((r) => r.status === 'VOIDED').length;
+    return [
+      { label: 'Total sales', value: String(active.length), icon: <Receipt size={17} />, tone: 'navy' },
+      { label: 'Total revenue', value: formatKes(totalRevenue), icon: <CircleDollarSign size={17} />, tone: 'green' },
+      { label: 'Outstanding', value: formatKes(totalRevenue - totalCollected), icon: <AlertTriangle size={17} />, tone: 'gold' },
+      { label: 'Voided', value: String(voided), icon: <X size={17} />, tone: 'red' },
+    ];
+  }
   if (type === 'inventory') {
     const low = rows.filter((r) => (r.quantity_on_hand as number) > 0 && (r.quantity_on_hand as number) <= (r.reorder_level as number)).length;
     const out = rows.filter((r) => (r.quantity_on_hand as number) === 0).length;
@@ -2276,6 +2578,9 @@ function ReportsSection() {
         result = (data ?? []) as ReportRow[];
       } else if (reportType === 'financial') {
         const { data } = await supabase.from('invoices').select('invoice_number,status,created_at,total_minor,amount_paid_minor,customers(full_name),job_cards(job_number)').order('created_at', { ascending: false }).limit(REPORT_ROW_LIMIT);
+        result = (data ?? []) as ReportRow[];
+      } else if (reportType === 'sales') {
+        const { data } = await supabase.from('sales').select('sale_number,sale_date,customer_name,salesperson_name,payment_method,total_minor,amount_paid_minor,balance_minor,status').order('sale_date', { ascending: false }).limit(REPORT_ROW_LIMIT);
         result = (data ?? []) as ReportRow[];
       } else if (reportType === 'inventory') {
         const { data } = await supabase.from('parts').select('sku,name,category,quantity_on_hand,reorder_level,cost_price_minor,selling_price_minor').eq('active', true).order('name');
@@ -2428,6 +2733,7 @@ function UsersSection({ onNotice }: { onNotice: (m: string) => void }) {
     const map: Record<string, string[]> = {};
     for (const item of (rp.data as unknown as { role_id: string; permissions: { key: string } }[]) ?? []) { if (!map[item.role_id]) map[item.role_id] = []; map[item.role_id].push(item.permissions.key); }
     setRolePerms(map);
+    if (s.error) onNotice(s.error.message || 'Could not load the staff directory.');
     setStaff((s.data ?? []) as StaffRow[]);
     setLoading(false);
   }
@@ -2553,8 +2859,8 @@ function InviteEmployeeForm({ roles, onClose, onSaved }: { roles: Role[]; onClos
 }
 
 // === SHARED COMPONENTS ===
-function SectionPanel({ eyebrow, title, onNew, newLabel, children }: { eyebrow: string; title: string; onNew?: () => void; newLabel?: string; children: React.ReactNode }) {
-  return <section className="panel table-panel"><div className="panel-heading"><div><p className="eyebrow">{eyebrow}</p><h3>{title}</h3></div>{onNew && <button className="button primary small" onClick={onNew}><Plus size={16} /> {newLabel}</button>}</div>{children}</section>;
+function SectionPanel({ eyebrow, title, onNew, newLabel, extra, children }: { eyebrow: string; title: string; onNew?: () => void; newLabel?: string; extra?: React.ReactNode; children: React.ReactNode }) {
+  return <section className="panel table-panel"><div className="panel-heading"><div><p className="eyebrow">{eyebrow}</p><h3>{title}</h3></div><div className="action-buttons">{extra}{onNew && <button className="button primary small" onClick={onNew}><Plus size={16} /> {newLabel}</button>}</div></div>{children}</section>;
 }
 function PoweredByFooter({ className }: { className?: string }) {
   return <a className={`powered-by ${className ?? ''}`} href="https://qeemlabs.co.ke" target="_blank" rel="noopener noreferrer">Created and Powered by Qeem Labs Ltd</a>;
@@ -2716,7 +3022,7 @@ function POForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string
 
 function QuotationForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string) => void }) {
   const [jobId, setJobId] = useState(''); const [jobs, setJobs] = useState<(JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[]>([]); const [busy, setBusy] = useState(false);
-  useEffect(() => { supabase.from('job_cards').select('*, vehicles(registration_number), customers(full_name)').in('status', ['OPEN','IN_PROGRESS']).is('deleted_at', null).order('created_at', { ascending: false }).limit(50).then(({ data }) => setJobs((data ?? []) as (JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[])); }, []);
+  useEffect(() => { supabase.from('job_cards').select('*, vehicles(registration_number), customers(full_name)').in('status', ['DRAFT','OPEN','IN_PROGRESS']).is('deleted_at', null).order('created_at', { ascending: false }).limit(50).then(({ data }) => setJobs((data ?? []) as (JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[])); }, []);
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true);
     const job = jobs.find((j) => j.id === jobId); if (!job) { setBusy(false); return; }

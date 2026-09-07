@@ -2,11 +2,19 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { ScrapCurrentStockRow, ScrapPurchase, ScrapStockAdjustment, StockCycle, ScrapClearanceSale } from '@/lib/types';
 import { formatKes, formatKg, formatDate, formatDateTime } from '@/lib/formatting';
-import { statusStyles } from '@/lib/constants';
-import { ArrowUpDown, ChevronRight, Boxes, PackageMinus, RotateCcw, CircleDollarSign } from 'lucide-react';
+import { statusStyles, byScrapTypeOrder, SCRAP_TYPE_ORDER, scrapGroupLabel } from '@/lib/constants';
+import { ArrowUpDown, ChevronRight, ChevronDown, Boxes, PackageMinus, RotateCcw, CircleDollarSign } from 'lucide-react';
 import { ScrapClearanceSaleForm } from './ScrapStockActions';
 
 type SortKey = 'name' | 'quantity' | 'rate' | 'value';
+
+type StockGroup = { label: string; members: ScrapCurrentStockRow[]; quantity: number; value: number; blendedRate: number | null };
+
+function groupOrderIndex(members: ScrapCurrentStockRow[]): number {
+  const indices = members.map((m) => SCRAP_TYPE_ORDER.findIndex((n) => n.toLowerCase() === m.name.trim().toLowerCase()));
+  const valid = indices.filter((i) => i !== -1);
+  return valid.length > 0 ? Math.min(...valid) : Infinity;
+}
 
 export default function ScrapStockTab({ stock, can, onClear, onNewCycle, onNotice, onRefresh }: {
   stock: ScrapCurrentStockRow[];
@@ -19,23 +27,48 @@ export default function ScrapStockTab({ stock, can, onClear, onNewCycle, onNotic
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     else { setSortKey(key); setSortDir('asc'); }
   }
 
-  const sorted = useMemo(() => {
-    const dir = sortDir === 'asc' ? 1 : -1;
-    return [...stock].sort((a, b) => {
-      if (sortKey === 'name') return a.name.localeCompare(b.name) * dir;
-      if (sortKey === 'quantity') return (a.current_quantity - b.current_quantity) * dir;
-      if (sortKey === 'rate') return ((a.current_rate_minor ?? -1) - (b.current_rate_minor ?? -1)) * dir;
-      const av = a.current_quantity * (a.current_rate_minor ?? 0);
-      const bv = b.current_quantity * (b.current_rate_minor ?? 0);
-      return (av - bv) * dir;
+  function toggleExpanded(label: string) {
+    setExpanded((prev) => { const next = new Set(prev); if (next.has(label)) next.delete(label); else next.add(label); return next; });
+  }
+
+  // Heavy 1/2, Light 1/2 and ND 1/2 are the same scrap type at different supplier
+  // rates — combined into one line here; every other type (including Battery 1/2,
+  // which are genuinely different grades) stays as its own single-member group.
+  const groups = useMemo(() => {
+    const map = new Map<string, ScrapCurrentStockRow[]>();
+    for (const item of stock) {
+      const label = scrapGroupLabel(item.name);
+      if (!map.has(label)) map.set(label, []);
+      map.get(label)!.push(item);
+    }
+    return Array.from(map.entries()).map(([label, members]): StockGroup => {
+      const sortedMembers = [...members].sort(byScrapTypeOrder);
+      const quantity = members.reduce((s, m) => s + m.current_quantity, 0);
+      const value = members.reduce((s, m) => s + m.current_quantity * (m.current_rate_minor ?? 0), 0);
+      return { label, members: sortedMembers, quantity, value, blendedRate: quantity > 0 ? Math.round(value / quantity) : null };
     });
-  }, [stock, sortKey, sortDir]);
+  }, [stock]);
+
+  const sortedGroups = useMemo(() => {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...groups].sort((a, b) => {
+      if (sortKey === 'name') {
+        const ai = groupOrderIndex(a.members); const bi = groupOrderIndex(b.members);
+        if (ai !== bi) return (ai - bi) * dir;
+        return a.label.localeCompare(b.label) * dir;
+      }
+      if (sortKey === 'quantity') return (a.quantity - b.quantity) * dir;
+      if (sortKey === 'rate') return ((a.blendedRate ?? -1) - (b.blendedRate ?? -1)) * dir;
+      return (a.value - b.value) * dir;
+    });
+  }, [groups, sortKey, sortDir]);
 
   const totalKg = stock.reduce((sum, s) => sum + s.current_quantity, 0);
   const totalValueMinor = stock.reduce((sum, s) => sum + s.current_quantity * (s.current_rate_minor ?? 0), 0);
@@ -62,22 +95,46 @@ export default function ScrapStockTab({ stock, can, onClear, onNewCycle, onNotic
       </div>
 
       <div className="panel">
-        <div className="data-table">
-          <div className="table-row" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.05em', color: '#8997a5', fontWeight: 800 }}>
-            <button className="sortable-th" onClick={() => toggleSort('name')}>Scrap type <ArrowUpDown size={11} /></button>
-            <button className="sortable-th" onClick={() => toggleSort('quantity')}>Current stock <ArrowUpDown size={11} /></button>
-            <button className="sortable-th" onClick={() => toggleSort('rate')}>Rate/kg <ArrowUpDown size={11} /></button>
-            <button className="sortable-th" onClick={() => toggleSort('value')}>Est. value <ArrowUpDown size={11} /></button>
-          </div>
-          {sorted.map((item) => (
-            <div className="table-row clickable" key={item.scrap_item_id} onClick={() => setSelectedItemId(item.scrap_item_id)}>
-              <div><strong>{item.name}</strong>{item.current_quantity === 0 && <span>Zero stock</span>}</div>
-              <span className="table-muted">{formatKg(item.current_quantity)}</span>
-              <span className="table-muted">{item.current_rate_minor === null ? 'Not set' : formatKes(item.current_rate_minor)}</span>
-              <span className="table-muted">{formatKes(item.current_quantity * (item.current_rate_minor ?? 0))}</span>
-              <ChevronRight size={16} className="row-arrow" />
-            </div>
-          ))}
+        <div className="report-table-wrap">
+          <table className="report-table">
+            <thead><tr>
+              <th><button className="sortable-th" onClick={() => toggleSort('name')}>Scrap Type <ArrowUpDown size={11} /></button></th>
+              <th className="numeric"><button className="sortable-th" onClick={() => toggleSort('quantity')}>Current Stock <ArrowUpDown size={11} /></button></th>
+              <th className="numeric"><button className="sortable-th" onClick={() => toggleSort('rate')}>Rate / Kg <ArrowUpDown size={11} /></button></th>
+              <th className="numeric"><button className="sortable-th" onClick={() => toggleSort('value')}>Est. Value <ArrowUpDown size={11} /></button></th>
+            </tr></thead>
+            <tbody>
+              {sortedGroups.map((group) => {
+                const isMerged = group.members.length > 1;
+                const isOpen = expanded.has(group.label);
+                if (!isMerged) {
+                  const item = group.members[0];
+                  return <tr key={group.label} className="clickable" onClick={() => setSelectedItemId(item.scrap_item_id)}>
+                    <td><strong>{item.name}</strong>{item.current_quantity === 0 && <span className="table-subtext">Zero stock</span>}</td>
+                    <td className="numeric">{formatKg(item.current_quantity)}</td>
+                    <td className="numeric">{item.current_rate_minor === null ? 'Not set' : formatKes(item.current_rate_minor)}</td>
+                    <td className="numeric">{formatKes(item.current_quantity * (item.current_rate_minor ?? 0))}</td>
+                  </tr>;
+                }
+                return <React.Fragment key={group.label}>
+                  <tr className="clickable" onClick={() => toggleExpanded(group.label)}>
+                    <td><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<strong>{group.label}</strong></span>{group.quantity === 0 && <span className="table-subtext">Zero stock</span>}</td>
+                    <td className="numeric">{formatKg(group.quantity)}</td>
+                    <td className="numeric">{group.blendedRate === null ? 'Not set' : `~${formatKes(group.blendedRate)}`}</td>
+                    <td className="numeric">{formatKes(group.value)}</td>
+                  </tr>
+                  {isOpen && group.members.map((item) => (
+                    <tr key={item.scrap_item_id} className="clickable" onClick={() => setSelectedItemId(item.scrap_item_id)} style={{ background: '#fafcff' }}>
+                      <td style={{ paddingLeft: 34 }}>{item.name}{item.current_quantity === 0 && <span className="table-subtext">Zero stock</span>}</td>
+                      <td className="numeric">{formatKg(item.current_quantity)}</td>
+                      <td className="numeric">{item.current_rate_minor === null ? 'Not set' : formatKes(item.current_rate_minor)}</td>
+                      <td className="numeric">{formatKes(item.current_quantity * (item.current_rate_minor ?? 0))}</td>
+                    </tr>
+                  ))}
+                </React.Fragment>;
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

@@ -1,5 +1,5 @@
 export function formatKes(minor: number): string {
-  return new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 2 }).format(minor / 100);
+  return new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(minor / 100);
 }
 
 export function formatNumber(value: number): string {

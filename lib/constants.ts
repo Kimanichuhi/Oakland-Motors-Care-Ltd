@@ -100,6 +100,37 @@ export const SCRAP_EXPENSE_CATEGORIES = ['Water','Transaction / Withdrawal Fees'
 export const STOCK_ADJUSTMENT_TYPES = ['CLEARANCE','OPENING','CORRECTION_INCREASE','CORRECTION_DECREASE'] as const;
 export const STOCK_CYCLE_STATUSES = ['OPEN','CLOSED'] as const;
 
+// Joseph's paper/Excel scrap sheet always lists types in this order rather than
+// alphabetically — mirrored here so every scrap screen (purchase entry, stock
+// position, item manager) reads the same way his sheet does.
+export const SCRAP_TYPE_ORDER = ['Heavy 1','Heavy 2','Light 1','Light 2','Soft','ND 1','ND 2','Plastic','Battery 1','Battery 2','Brass','Gumboot','Hard','Cast'];
+
+/** Sorts by position in SCRAP_TYPE_ORDER (matched case-insensitively); anything not
+ * on the sheet falls after, alphabetically. */
+export function byScrapTypeOrder<T extends { name: string }>(a: T, b: T): number {
+  const key = (n: string) => n.trim().toLowerCase();
+  const ai = SCRAP_TYPE_ORDER.findIndex((n) => n.toLowerCase() === key(a.name));
+  const bi = SCRAP_TYPE_ORDER.findIndex((n) => n.toLowerCase() === key(b.name));
+  if (ai === -1 && bi === -1) return a.name.localeCompare(b.name);
+  if (ai === -1) return 1;
+  if (bi === -1) return -1;
+  return ai - bi;
+}
+
+// Heavy 1/2, Light 1/2 and ND 1/2 are the same scrap type bought at different
+// supplier rates — Joseph tracks them separately for pricing but wants the stock
+// position screen to show them as one combined line. Battery 1/2 are genuinely
+// different grades and stay split.
+export const SCRAP_TYPE_GROUPS: Record<string, string> = {
+  'heavy 1': 'Heavy', 'heavy 2': 'Heavy',
+  'light 1': 'Light', 'light 2': 'Light',
+  'nd 1': 'ND', 'nd 2': 'ND',
+};
+
+export function scrapGroupLabel(name: string): string {
+  return SCRAP_TYPE_GROUPS[name.trim().toLowerCase()] ?? name.trim();
+}
+
 export const statusStyles: Record<string, string> = {
   RECEIVED: 'bg-amber-50 text-amber-700',
   INSPECTION: 'bg-cyan-50 text-cyan-700',
