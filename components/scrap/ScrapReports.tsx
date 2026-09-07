@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import type { ScrapCashSummary, ScrapPurchase, ScrapCurrentStockRow, StockCycle, ScrapStockAdjustment, ScrapItem } from '@/lib/types';
+import type { ScrapCashSummary, ScrapPurchase, ScrapCurrentStockRow, StockCycle, ScrapStockAdjustment, ScrapItem, ScrapClearanceSale } from '@/lib/types';
 import { formatKes, formatKg, formatDate, localDateStr } from '@/lib/formatting';
 import { statusStyles } from '@/lib/constants';
 import { CalendarDays, Boxes, RotateCcw, PackageMinus } from 'lucide-react';
+import { ReconciliationReceiptView } from './ScrapStockTab';
 
 type ReportId = 'monthly' | 'daily' | 'stock' | 'cycles' | 'clearances';
 const REPORTS: { id: ReportId; label: string; icon: React.ReactNode }[] = [
@@ -207,15 +208,26 @@ function CycleHistoryReport() {
   );
 }
 
+type ClearanceAdjustment = ScrapStockAdjustment & { scrap_items: { name: string } | null; stock_cycles: { cycle_number: number } | null };
+
 function ClearanceReport() {
-  const [adjustments, setAdjustments] = useState<(ScrapStockAdjustment & { scrap_items: { name: string } | null; stock_cycles: { cycle_number: number } | null })[]>([]);
+  const [adjustments, setAdjustments] = useState<ClearanceAdjustment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [receiptTarget, setReceiptTarget] = useState<ClearanceAdjustment | null>(null);
+  const [receiptSale, setReceiptSale] = useState<ScrapClearanceSale | null>(null);
+
   useEffect(() => {
     supabase.from('scrap_stock_adjustments').select('*, scrap_items(name), stock_cycles(cycle_number)').eq('adjustment_type', 'CLEARANCE').order('date', { ascending: false }).then(({ data }) => {
-      setAdjustments((data ?? []) as (ScrapStockAdjustment & { scrap_items: { name: string } | null; stock_cycles: { cycle_number: number } | null })[]);
+      setAdjustments((data ?? []) as ClearanceAdjustment[]);
       setLoading(false);
     });
   }, []);
+
+  async function openReceipt(a: ClearanceAdjustment) {
+    const { data } = await supabase.from('scrap_clearance_sales').select('*').eq('stock_adjustment_id', a.id).maybeSingle();
+    setReceiptSale(data as ScrapClearanceSale | null);
+    setReceiptTarget(a);
+  }
 
   return (
     <>
@@ -225,7 +237,7 @@ function ClearanceReport() {
       {loading ? <div className="empty"><strong>Loading…</strong></div> : adjustments.length === 0 ? <div className="empty"><strong>No clearances recorded</strong></div> : (
         <div className="panel"><div className="data-table">
           {adjustments.map((a) => (
-            <div className="table-row" key={a.id}>
+            <div className="table-row clickable" key={a.id} onClick={() => void openReceipt(a)}>
               <div><strong>{a.scrap_items?.name}</strong><span>{formatDate(a.date)} · Cycle {a.stock_cycles?.cycle_number} · {a.reason}</span></div>
               <span className="table-muted">Before {formatKg(a.previous_stock)}</span>
               <span className="table-muted">Cleared {formatKg(a.quantity)}</span>
@@ -235,6 +247,7 @@ function ClearanceReport() {
           ))}
         </div></div>
       )}
+      {receiptTarget && <ReconciliationReceiptView itemName={receiptTarget.scrap_items?.name ?? 'Scrap type'} cycleNumber={receiptTarget.stock_cycles?.cycle_number ?? 0} adjustment={receiptTarget} sale={receiptSale} onClose={() => { setReceiptTarget(null); setReceiptSale(null); }} />}
     </>
   );
 }

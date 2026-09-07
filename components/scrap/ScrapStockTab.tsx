@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase';
 import type { ScrapCurrentStockRow, ScrapPurchase, ScrapStockAdjustment, StockCycle, ScrapClearanceSale } from '@/lib/types';
 import { formatKes, formatKg, formatDate, formatDateTime } from '@/lib/formatting';
 import { statusStyles, byScrapTypeOrder, SCRAP_TYPE_ORDER, scrapGroupLabel } from '@/lib/constants';
-import { ArrowUpDown, ChevronRight, ChevronDown, Boxes, PackageMinus, RotateCcw, CircleDollarSign } from 'lucide-react';
+import { ArrowUpDown, ChevronRight, ChevronDown, Boxes, PackageMinus, RotateCcw, CircleDollarSign, Printer, X } from 'lucide-react';
 import { ScrapClearanceSaleForm } from './ScrapStockActions';
 
 type SortKey = 'name' | 'quantity' | 'rate' | 'value';
@@ -161,6 +161,7 @@ function ScrapItemHistory({ item, can, onBack, onNotice, onRefresh }: {
   const [clearanceSales, setClearanceSales] = useState<ScrapClearanceSale[]>([]);
   const [loading, setLoading] = useState(true);
   const [saleTarget, setSaleTarget] = useState<ScrapStockAdjustment | null>(null);
+  const [receiptRow, setReceiptRow] = useState<TimelineRow | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -239,16 +240,18 @@ function ScrapItemHistory({ item, can, onBack, onNotice, onRefresh }: {
           <div className="data-table">
             {rows.map((r) => {
               const sale = r.adjustment ? saleByAdjustment.get(r.adjustment.id) : null;
+              const isClearance = r.type === 'CLEARANCE';
               return (
-                <div className="table-row" key={r.key}>
+                <div className={`table-row ${isClearance ? 'clickable' : ''}`} key={r.key} onClick={isClearance ? () => setReceiptRow(r) : undefined}>
                   <div><strong>{formatDate(r.date)} · Cycle {r.cycleNumber}</strong><span>{r.detail}</span></div>
                   <span className={`status ${statusStyles[r.type] ?? ''}`}>{r.type.replaceAll('_', ' ')}</span>
                   <span className="table-muted">{formatKg(r.before)} → {formatKg(r.after)}</span>
-                  {r.type === 'CLEARANCE' && can('scrap.manage') && (
+                  {isClearance && can('scrap.manage') && (
                     sale
                       ? <span className="table-muted">Sold {formatKes(sale.amount_minor)}</span>
-                      : <button className="button secondary small" onClick={() => setSaleTarget(r.adjustment!)}>Record proceeds</button>
+                      : <button className="button secondary small" onClick={(e) => { e.stopPropagation(); setSaleTarget(r.adjustment!); }}>Record proceeds</button>
                   )}
+                  {isClearance && <ChevronRight size={16} className="row-arrow" />}
                 </div>
               );
             })}
@@ -257,6 +260,59 @@ function ScrapItemHistory({ item, can, onBack, onNotice, onRefresh }: {
       </section>
 
       {saleTarget && <ScrapClearanceSaleForm adjustment={saleTarget} onClose={() => setSaleTarget(null)} onSaved={(m) => { onNotice(m); onRefresh(); setSaleTarget(null); }} />}
+      {receiptRow?.adjustment && <ReconciliationReceiptView itemName={item.name} cycleNumber={receiptRow.cycleNumber} adjustment={receiptRow.adjustment} sale={saleByAdjustment.get(receiptRow.adjustment.id) ?? null} onClose={() => setReceiptRow(null)} />}
+    </div>
+  );
+}
+
+export function ReconciliationReceiptView({ itemName, cycleNumber, adjustment, sale, onClose }: { itemName: string; cycleNumber: number; adjustment: ScrapStockAdjustment; sale: ScrapClearanceSale | null; onClose: () => void }) {
+  return (
+    <div className="print-overlay">
+      <div className="print-toolbar no-print">
+        <strong>Reconciliation receipt — {itemName} · {formatDate(adjustment.date)}</strong>
+        <div className="action-buttons">
+          <button className="button primary small" onClick={() => window.print()}><Printer size={15} /> Print / Save as PDF</button>
+          <button className="close-button" onClick={onClose}><X size={16} /></button>
+        </div>
+      </div>
+      <div id="print-area" className="print-sheet">
+        <div className="print-header">
+          <div><h1>Oakland Motor Care Ltd. — Scrap Yard</h1><p className="muted">Stock reconciliation receipt</p></div>
+          <div style={{ textAlign: 'right' }}>
+            <p className="print-field"><span>Date</span><strong style={{ fontSize: 18 }}>{formatDate(adjustment.date)}</strong></p>
+            <p className="print-field"><span>Cycle</span><strong>{cycleNumber}</strong></p>
+          </div>
+        </div>
+        <div className="print-section">
+          <h4>Scrap type</h4>
+          <p className="print-field"><strong style={{ fontSize: 16 }}>{itemName}</strong></p>
+        </div>
+        <div className="print-section">
+          <h4>Reconciliation</h4>
+          <table className="print-table"><tbody>
+            <tr><td>Stock before clearance (loaded &amp; measured)</td><td>{formatKg(adjustment.previous_stock)}</td></tr>
+            <tr><td>Quantity cleared</td><td>-{formatKg(adjustment.quantity)}</td></tr>
+            <tr><td><strong>Stock remaining — carries forward as opening stock</strong></td><td><strong>{formatKg(adjustment.resulting_stock)}</strong></td></tr>
+          </tbody></table>
+        </div>
+        <div className="print-section">
+          <h4>Confirmation</h4>
+          <p className="print-field"><span>Reason</span><strong>{adjustment.reason}</strong></p>
+          <p className="print-field"><span>Authorized by</span><strong>{adjustment.authorized_by}</strong></p>
+          {adjustment.notes && <p className="print-field"><span>Notes</span><strong>{adjustment.notes}</strong></p>}
+        </div>
+        {sale && <div className="print-section">
+          <h4>Proceeds</h4>
+          <p className="print-field"><span>Amount received</span><strong>{formatKes(sale.amount_minor)}</strong></p>
+          {sale.buyer && <p className="print-field"><span>Buyer</span><strong>{sale.buyer}</strong></p>}
+          {sale.reference && <p className="print-field"><span>Reference</span><strong>{sale.reference}</strong></p>}
+        </div>}
+        <div className="signature-grid">
+          <div className="signature-box">Measured by<span>Signature</span></div>
+          <div className="signature-box">Cleared by<span>Signature</span></div>
+          <div className="signature-box">Authorized by<span>Signature</span></div>
+        </div>
+      </div>
     </div>
   );
 }
