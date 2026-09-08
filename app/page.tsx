@@ -468,7 +468,7 @@ function SectionRouter(props: SectionProps) {
     case 'payments': return <PaymentsSection onNotice={p.onNotice} />;
     case 'receipts': return <ReceiptsSection onNotice={p.onNotice} can={p.can} />;
     case 'reports': return <ReportsSection />;
-    case 'notifications': return <NotificationsSection onRefresh={p.onRefresh} />;
+    case 'notifications': return <NotificationsSection onRefresh={p.onRefresh} can={p.can} onSelectInvoice={(id) => { p.setSelectedInvoiceId(id); p.setSection('invoices'); }} />;
     case 'audit': return <AuditSection />;
     case 'settings': return <SettingsSection onNotice={p.onNotice} />;
     case 'users': return <UsersSection onNotice={p.onNotice} />;
@@ -2811,9 +2811,14 @@ function ReportsSection() {
 }
 
 // === NOTIFICATIONS ===
-function NotificationsSection({ onRefresh }: { onRefresh: () => void }) {
+type OverdueInvoiceRow = Invoice & { customers: { full_name: string } | null };
+
+function NotificationsSection({ onRefresh, can, onSelectInvoice }: { onRefresh: () => void; can: (p: string) => boolean; onSelectInvoice: (id: string) => void }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [overdueInvoices, setOverdueInvoices] = useState<OverdueInvoiceRow[]>([]);
+  const [overdueLoading, setOverdueLoading] = useState(true);
+
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -2821,14 +2826,30 @@ function NotificationsSection({ onRefresh }: { onRefresh: () => void }) {
       setLoading(false);
     })();
   }, []);
+
+  useEffect(() => {
+    if (!can('invoice.view')) { setOverdueLoading(false); return; }
+    supabase.from('invoices').select('*, customers(full_name)').lt('due_date', localDateStr()).not('status', 'in', '(PAID,VOID)').order('due_date').limit(100).then(({ data }) => {
+      const rows = ((data ?? []) as OverdueInvoiceRow[]).filter((inv) => inv.amount_paid_minor < inv.total_minor);
+      setOverdueInvoices(rows); setOverdueLoading(false);
+    });
+  }, [can]);
+
   async function markRead(id: string) {
     await supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', id);
     setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read_at: new Date().toISOString() } : n));
     onRefresh();
   }
-  return <SectionPanel eyebrow="Alerts" title="Notifications">
-    {loading ? <Loading /> : notifications.length === 0 ? <Empty title="No notifications" text="You're all caught up." /> : <div className="data-table">{notifications.map((n) => <div className={`table-row ${n.read_at ? 'read' : 'unread'}`} key={n.id} onClick={() => { if (!n.read_at) void markRead(n.id); }}><div className="job-icon"><Bell size={17} /></div><div><strong>{n.title}</strong><span>{n.message}</span></div><span className="table-muted">{formatDateTime(n.created_at)}</span>{!n.read_at && <span className="status bg-blue-50 text-blue-700">New</span>}</div>)}</div>}
-  </SectionPanel>;
+
+  return <>
+    {can('invoice.view') && !overdueLoading && overdueInvoices.length > 0 && <section className="panel table-panel" style={{ marginBottom: 24 }}>
+      <div className="panel-heading"><div><p className="eyebrow">Not stored — computed live</p><h3>Overdue Invoices ({overdueInvoices.length})</h3></div></div>
+      <div className="data-table">{overdueInvoices.map((inv) => <div className="table-row clickable" key={inv.id} onClick={() => onSelectInvoice(inv.id)}><div className="job-icon"><AlertTriangle size={17} /></div><div><strong>{inv.invoice_number}</strong><span>{inv.customers?.full_name ?? 'Customer'} · Due {formatDate(inv.due_date)}</span></div><span className="table-muted">{formatKes(inv.total_minor - inv.amount_paid_minor)} outstanding</span><span className="status bg-red-50 text-red-700">OVERDUE</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>
+    </section>}
+    <SectionPanel eyebrow="Alerts" title="Notifications">
+      {loading ? <Loading /> : notifications.length === 0 ? <Empty title="No notifications" text="You're all caught up." /> : <div className="data-table">{notifications.map((n) => <div className={`table-row ${n.read_at ? 'read' : 'unread'}`} key={n.id} onClick={() => { if (!n.read_at) void markRead(n.id); }}><div className="job-icon"><Bell size={17} /></div><div><strong>{n.title}</strong><span>{n.message}</span></div><span className="table-muted">{formatDateTime(n.created_at)}</span>{!n.read_at && <span className="status bg-blue-50 text-blue-700">New</span>}</div>)}</div>}
+    </SectionPanel>
+  </>;
 }
 
 // === AUDIT ===
