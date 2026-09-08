@@ -13,7 +13,7 @@ import {
   LayoutDashboard, LogOut, Menu, Package, Plus, Search, Settings, ShieldCheck, Sparkles, Users,
   Wrench, X, FileText, Truck, ShoppingCart, Receipt, ScrollText, UserCog, AlertTriangle,
   TrendingUp, Download, Eye, Edit, Archive, Trash2, Phone, Mail, MapPin, Filter, ChevronRight,
-  Briefcase, Boxes, Store, Banknote, Smartphone, FileCheck, Clock, Activity, Calendar, Printer, Recycle, DoorOpen, Ban, Circle,
+  Briefcase, Boxes, Store, Banknote, Smartphone, FileCheck, Clock, Activity, Calendar, Printer, Recycle, DoorOpen, Ban, Circle, Scale,
 } from 'lucide-react';
 
 import SalesSection from '@/components/sales/SalesSection';
@@ -22,6 +22,7 @@ import SaleForm from '@/components/sales/SaleForm';
 import ScrapDashboardPage from '@/components/scrap/ScrapDashboardPage';
 import ScrapRecordsPage from '@/components/scrap/ScrapRecordsPage';
 import ScrapStockPage from '@/components/scrap/ScrapStockPage';
+import ScrapReconciliationPage from '@/components/scrap/ScrapReconciliationPage';
 import ScrapFinancesPage from '@/components/scrap/ScrapFinancesPage';
 import ScrapReportsPage from '@/components/scrap/ScrapReportsPage';
 import ScrapTypesPage from '@/components/scrap/ScrapTypesPage';
@@ -31,7 +32,7 @@ type SectionId =
   | 'dashboard' | 'customers' | 'vehicles' | 'vehicleregister' | 'jobcards' | 'services' | 'technicians'
   | 'sales' | 'parts' | 'stockmovements' | 'lowstock' | 'suppliers' | 'procurement'
   | 'quotations' | 'invoices' | 'payments' | 'receipts'
-  | 'scrapdashboard' | 'scraprecords' | 'scrapstock' | 'scrapfinances' | 'scrapreports' | 'scraptypes'
+  | 'scrapdashboard' | 'scraprecords' | 'scrapstock' | 'scrapreconciliation' | 'scrapfinances' | 'scrapreports' | 'scraptypes'
   | 'reports' | 'notifications' | 'audit' | 'settings' | 'users';
 
 const NAV_GROUPS: { label: string; items: { id: SectionId; label: string; icon: React.ReactNode; perm: string }[] }[] = [
@@ -56,6 +57,7 @@ const NAV_GROUPS: { label: string; items: { id: SectionId; label: string; icon: 
     { id: 'scrapdashboard', label: 'Overview', icon: <LayoutDashboard size={18} />, perm: 'scrap.view' },
     { id: 'scraprecords', label: 'Daily Records', icon: <ClipboardList size={18} />, perm: 'scrap.view' },
     { id: 'scrapstock', label: 'Stock Position', icon: <Boxes size={18} />, perm: 'scrap.view' },
+    { id: 'scrapreconciliation', label: 'Reconciliation', icon: <Scale size={18} />, perm: 'scrap.view' },
     { id: 'scrapfinances', label: 'Finances', icon: <CircleDollarSign size={18} />, perm: 'scrap.view' },
     { id: 'scrapreports', label: 'Reports', icon: <Gauge size={18} />, perm: 'scrap.view' },
     { id: 'scraptypes', label: 'Scrap Types & Rates', icon: <Recycle size={18} />, perm: 'scrap.manage' },
@@ -458,6 +460,7 @@ function SectionRouter(props: SectionProps) {
     case 'scrapdashboard': return <ScrapDashboardPage can={p.can} onNotice={p.onNotice} onNavigateToStock={() => p.setSection('scrapstock')} />;
     case 'scraprecords': return <ScrapRecordsPage can={p.can} onNotice={p.onNotice} />;
     case 'scrapstock': return <ScrapStockPage can={p.can} onNotice={p.onNotice} />;
+    case 'scrapreconciliation': return <ScrapReconciliationPage can={p.can} onNotice={p.onNotice} />;
     case 'scrapfinances': return <ScrapFinancesPage />;
     case 'scrapreports': return <ScrapReportsPage can={p.can} />;
     case 'scraptypes': return <ScrapTypesPage can={p.can} onNotice={p.onNotice} />;
