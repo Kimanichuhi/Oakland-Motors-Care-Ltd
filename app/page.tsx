@@ -7,7 +7,7 @@ import { formatKes, formatDate, formatDateTime, computeLineTotal, downloadCSV, f
 import { getTaxRate, clearTaxRateCache } from '@/lib/settings';
 import { statusStyles, JOB_TRANSITIONS, PAYMENT_METHODS, SALES_PAYMENT_METHODS, SALES_PAYMENT_STATUSES, CUSTOMER_SALE_TYPES, PART_CATEGORIES, JOB_TYPE_META, MOVEMENT_TYPES } from '@/lib/constants';
 import { loadUserPermissions, hasPermission, clearPermissionCache, type UserPermission } from '@/lib/permissions';
-import type { Customer, Vehicle, Service, Part, Supplier, JobCard, JobCardLabour, JobCardPart, JobCardStatusHistory, JobCardInspectionItem, JobCardWorkItem, JobCardDiagnosis, JobCardQualityCheck, JobCardSignoff, Invoice, InvoiceItem, Payment, Quotation, QuotationItem, PurchaseOrder, PurchaseOrderItem, StockMovement, Sale, SaleItem, Employee, Notification, AuditLog, BusinessSettings, Role, Permission, Profile } from '@/lib/types';
+import type { Customer, Vehicle, Service, Part, Supplier, JobCard, JobCardLabour, JobCardPart, JobCardStatusHistory, JobCardInspectionItem, JobCardWorkItem, JobCardDiagnosis, JobCardQualityCheck, JobCardSignoff, Invoice, InvoiceItem, Payment, GeneralReceipt, GeneralReceiptItem, Quotation, QuotationItem, PurchaseOrder, PurchaseOrderItem, StockMovement, Sale, SaleItem, Employee, Notification, AuditLog, BusinessSettings, Role, Permission, Profile } from '@/lib/types';
 import {
   ArrowUpRight, Bell, CarFront, CheckCircle2, CircleDollarSign, ClipboardList, Gauge,
   LayoutDashboard, LogOut, Menu, Package, Plus, Search, Settings, ShieldCheck, Sparkles, Users,
@@ -463,7 +463,7 @@ function SectionRouter(props: SectionProps) {
     case 'scraptypes': return <ScrapTypesPage can={p.can} onNotice={p.onNotice} />;
     case 'vehicleregister': return <VehicleRegisterSection can={p.can} onNotice={p.onNotice} />;
     case 'payments': return <PaymentsSection onNotice={p.onNotice} />;
-    case 'receipts': return <ReceiptsSection onNotice={p.onNotice} />;
+    case 'receipts': return <ReceiptsSection onNotice={p.onNotice} can={p.can} />;
     case 'reports': return <ReportsSection />;
     case 'notifications': return <NotificationsSection onRefresh={p.onRefresh} />;
     case 'audit': return <AuditSection />;
@@ -2371,12 +2371,19 @@ function PaymentDetailModal({ payment, onClose }: { payment: PaymentWithDetail; 
 
 type ReceiptPayment = Payment & { invoices: { invoice_number: string; total_minor: number; amount_paid_minor: number; customers: { full_name: string } | null; job_cards: { job_number: string } | null } | null };
 
-function ReceiptsSection({ onNotice }: { onNotice: (m: string) => void }) {
+function ReceiptsSection({ onNotice, can }: { onNotice: (m: string) => void; can: (p: string) => boolean }) {
   const [payments, setPayments] = useState<ReceiptPayment[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<ReceiptPayment | null>(null);
   const [exporting, setExporting] = useState(false);
   useEffect(() => { supabase.from('payments').select('*, invoices(invoice_number, total_minor, amount_paid_minor, customers(full_name), job_cards(job_number))').order('paid_at', { ascending: false }).limit(50).then(({ data }) => { setPayments((data ?? []) as ReceiptPayment[]); setLoading(false); }); }, []);
+
+  const [generalReceipts, setGeneralReceipts] = useState<GeneralReceipt[]>([]);
+  const [generalLoading, setGeneralLoading] = useState(true);
+  const [generalRefreshKey, setGeneralRefreshKey] = useState(0);
+  const [showGeneralForm, setShowGeneralForm] = useState(false);
+  const [selectedGeneral, setSelectedGeneral] = useState<GeneralReceipt | null>(null);
+  useEffect(() => { supabase.from('general_receipts').select('*').order('receipt_date', { ascending: false }).limit(50).then(({ data }) => { setGeneralReceipts((data ?? []) as GeneralReceipt[]); setGeneralLoading(false); }); }, [generalRefreshKey]);
 
   async function exportCSV() {
     setExporting(true);
@@ -2398,10 +2405,184 @@ function ReceiptsSection({ onNotice }: { onNotice: (m: string) => void }) {
     })));
   }
 
-  return <SectionPanel eyebrow="Proof of payment" title="Receipts" extra={<button className="button secondary small" disabled={exporting} onClick={() => void exportCSV()}><Download size={15} /> {exporting ? 'Exporting…' : 'Export CSV'}</button>}>
-    {loading ? <Loading /> : payments.length === 0 ? <Empty title="No receipts" text="Receipts are generated when payments are recorded." /> : <div className="data-table">{payments.map((p) => <div className="table-row clickable" key={p.id} onClick={() => setSelected(p)}><div className="job-icon"><Receipt size={17} /></div><div><strong>RCP-{p.id.slice(-6).toUpperCase()}</strong><span>{p.invoices?.customers?.full_name ?? 'Customer'} · {p.invoices?.invoice_number ?? 'Invoice'} · Work Order {p.invoices?.job_cards?.job_number ?? '—'}</span></div><span className="table-muted">{formatKes(p.amount_minor)}</span><span className="status bg-emerald-50 text-emerald-700">{p.method}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
+  return <>
+    <SectionPanel eyebrow="Proof of payment" title="Receipts" extra={<button className="button secondary small" disabled={exporting} onClick={() => void exportCSV()}><Download size={15} /> {exporting ? 'Exporting…' : 'Export CSV'}</button>}>
+      {loading ? <Loading /> : payments.length === 0 ? <Empty title="No receipts" text="Receipts are generated when payments are recorded." /> : <div className="data-table">{payments.map((p) => <div className="table-row clickable" key={p.id} onClick={() => setSelected(p)}><div className="job-icon"><Receipt size={17} /></div><div><strong>RCP-{p.id.slice(-6).toUpperCase()}</strong><span>{p.invoices?.customers?.full_name ?? 'Customer'} · {p.invoices?.invoice_number ?? 'Invoice'} · Work Order {p.invoices?.job_cards?.job_number ?? '—'}</span></div><span className="table-muted">{formatKes(p.amount_minor)}</span><span className="status bg-emerald-50 text-emerald-700">{p.method}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
+    </SectionPanel>
+
+    <section className="panel table-panel" style={{ marginTop: 24 }}>
+      <div className="panel-heading">
+        <div><p className="eyebrow">Not tied to a vehicle or work order</p><h3>General Receipts</h3></div>
+        {can('payment.create') && <button className="button primary small" onClick={() => setShowGeneralForm(true)}><Plus size={16} /> Create Receipt</button>}
+      </div>
+      {generalLoading ? <Loading /> : generalReceipts.length === 0 ? <Empty title="No general receipts" text="Create a receipt for work that isn't tied to a vehicle, e.g. welding a door for a company." /> : <div className="data-table">{generalReceipts.map((r) => <div className="table-row clickable" key={r.id} onClick={() => setSelectedGeneral(r)}><div className="job-icon"><Receipt size={17} /></div><div><strong>{r.receipt_number}</strong><span>{r.client_name}</span></div><span className="table-muted">{formatDate(r.receipt_date)}</span><span className="table-muted">{formatKes(r.total_minor)}</span><span className="status bg-emerald-50 text-emerald-700">{r.payment_method}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
+    </section>
+
     {selected && <PaymentDetailModal payment={selected} onClose={() => setSelected(null)} />}
-  </SectionPanel>;
+    {showGeneralForm && <GeneralReceiptForm onClose={() => setShowGeneralForm(false)} onSaved={(m, r) => { onNotice(m); setGeneralRefreshKey((k) => k + 1); setShowGeneralForm(false); setSelectedGeneral(r); }} />}
+    {selectedGeneral && <GeneralReceiptPrintView receipt={selectedGeneral} onClose={() => setSelectedGeneral(null)} onNotice={onNotice} />}
+  </>;
+}
+
+type DraftReceiptItem = { id: number; description: string; quantity: number; unitPriceMinor: number };
+
+function GeneralReceiptForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string, receipt: GeneralReceipt) => void }) {
+  const [date, setDate] = useState(localDateStr());
+  const [clientName, setClientName] = useState('');
+  const [clientPhone, setClientPhone] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<string>(PAYMENT_METHODS[0]);
+  const [notes, setNotes] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const [items, setItems] = useState<DraftReceiptItem[]>([]);
+  const [nextItemId, setNextItemId] = useState(1);
+  const [itemDesc, setItemDesc] = useState('');
+  const [itemQty, setItemQty] = useState('1');
+  const [itemPrice, setItemPrice] = useState('');
+
+  function addItem() {
+    const quantity = Math.max(0.01, parseFloat(itemQty) || 1);
+    const unitPriceMinor = Math.round((parseFloat(itemPrice) || 0) * 100);
+    if (!itemDesc.trim() || unitPriceMinor <= 0) return;
+    setItems((prev) => [...prev, { id: nextItemId, description: itemDesc.trim(), quantity, unitPriceMinor }]);
+    setNextItemId((n) => n + 1);
+    setItemDesc(''); setItemQty('1'); setItemPrice('');
+  }
+  function removeItem(id: number) { setItems((prev) => prev.filter((i) => i.id !== id)); }
+
+  const total = items.reduce((s, i) => s + Math.round(i.quantity * i.unitPriceMinor), 0);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setError('');
+    if (items.length === 0) { setError('Add at least one service.'); return; }
+    setBusy(true);
+    const { data, error: rpcError } = await supabase.rpc('create_general_receipt', {
+      p_date: date, p_client_name: clientName.trim(), p_client_phone: clientPhone.trim() || null,
+      p_payment_method: paymentMethod, p_notes: notes.trim() || null,
+      p_items: items.map((i) => ({ description: i.description, quantity: i.quantity, unit_price_minor: i.unitPriceMinor })),
+    });
+    setBusy(false);
+    if (rpcError) { setError(rpcError.message || 'Unable to create the receipt.'); return; }
+    const receipt = data as GeneralReceipt;
+    onSaved(`Receipt ${receipt.receipt_number} created.`, receipt);
+  }
+
+  return <Modal title="Create Receipt" onClose={onClose}>
+    <form onSubmit={submit} className="modal-form">
+      <p className="muted" style={{ margin: '-8px 0 0' }}>For work that isn&apos;t tied to a vehicle — e.g. welding a door for a company.</p>
+      <label>Date<input type="date" value={date} max={localDateStr()} onChange={(e) => setDate(e.target.value)} required /></label>
+      <div className="form-row">
+        <label>Client name<input value={clientName} onChange={(e) => setClientName(e.target.value)} required placeholder="e.g. Aokland Garage" /></label>
+        <label>Phone <span className="optional">Optional</span><input value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} /></label>
+      </div>
+
+      <div className="form-row" style={{ gridTemplateColumns: '1fr 70px 110px auto', alignItems: 'end' }}>
+        <label>Service / item<input value={itemDesc} onChange={(e) => setItemDesc(e.target.value)} placeholder="e.g. Welding of a door" /></label>
+        <label>Qty<input type="number" min={0.01} step="0.01" value={itemQty} onChange={(e) => setItemQty(e.target.value)} /></label>
+        <label>Unit price (KES)<input type="number" min={0} step="0.01" value={itemPrice} onChange={(e) => setItemPrice(e.target.value)} /></label>
+        <button type="button" className="button secondary" disabled={!itemDesc.trim() || !(parseFloat(itemPrice) > 0)} onClick={addItem}><Plus size={15} /> Add</button>
+      </div>
+
+      {items.length > 0 && <div className="report-table-wrap">
+        <table className="report-table">
+          <thead><tr><th>#</th><th>Description</th><th className="numeric">Qty</th><th className="numeric">Unit Price</th><th className="numeric">Amount</th><th></th></tr></thead>
+          <tbody>{items.map((i, idx) => <tr key={i.id}>
+            <td>{idx + 1}</td>
+            <td>{i.description}</td>
+            <td className="numeric">{i.quantity}</td>
+            <td className="numeric">{formatKes(i.unitPriceMinor)}</td>
+            <td className="numeric">{formatKes(Math.round(i.quantity * i.unitPriceMinor))}</td>
+            <td className="numeric"><button type="button" className="close-button" style={{ width: 28, height: 28 }} onClick={() => removeItem(i.id)}><X size={14} /></button></td>
+          </tr>)}</tbody>
+        </table>
+      </div>}
+      {items.length > 0 && <div className="total-row"><strong>Total</strong><span>{formatKes(total)}</span></div>}
+
+      <label>Payment method<select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>{PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}</select></label>
+      <label>Notes <span className="optional">Optional</span><input value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
+      {error && <div className="form-error">{error}</div>}
+      <button className="button primary wide" disabled={busy || items.length === 0}>{busy ? 'Creating...' : 'Create receipt'} <ArrowUpRight size={16} /></button>
+    </form>
+  </Modal>;
+}
+
+function GeneralReceiptPrintView({ receipt, onClose, onNotice }: { receipt: GeneralReceipt; onClose: () => void; onNotice: (m: string) => void }) {
+  const [items, setItems] = useState<GeneralReceiptItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+
+  useEffect(() => { supabase.from('general_receipt_items').select('*').eq('general_receipt_id', receipt.id).order('created_at').then(({ data }) => { setItems((data ?? []) as GeneralReceiptItem[]); setLoading(false); }); }, [receipt.id]);
+
+  const blankRows = Math.max(0, 5 - items.length);
+
+  async function exportImage() {
+    const original = document.getElementById('print-area');
+    if (!original) return;
+    setExporting(true);
+    const clone = original.cloneNode(true) as HTMLElement;
+    const wrapper = document.createElement('div');
+    wrapper.style.position = 'absolute'; wrapper.style.top = '0'; wrapper.style.left = '-99999px';
+    wrapper.appendChild(clone);
+    document.body.appendChild(wrapper);
+    try {
+      await document.fonts?.ready;
+      const dataUrl = await toPng(clone, { pixelRatio: 2, width: clone.scrollWidth, height: clone.scrollHeight, backgroundColor: '#ffffff', cacheBust: true });
+      const link = document.createElement('a');
+      link.download = `${receipt.receipt_number}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch {
+      onNotice('Unable to export the receipt as an image. Please try again.');
+    } finally {
+      document.body.removeChild(wrapper);
+    }
+    setExporting(false);
+  }
+
+  return <div className="print-overlay">
+    <div className="print-toolbar no-print">
+      <strong>{receipt.receipt_number}</strong>
+      <div className="action-buttons">
+        <button className="button primary small" onClick={() => window.print()}><Printer size={15} /> Print / Save as PDF</button>
+        <button className="button secondary small" disabled={exporting} onClick={() => void exportImage()}><Download size={15} /> {exporting ? 'Exporting…' : 'Export as image'}</button>
+        <button className="close-button" onClick={onClose}><X size={18} /></button>
+      </div>
+    </div>
+    <div id="print-area" className="print-sheet">
+      <div className="print-header">
+        <div><img src="/logo.png" alt="Oakland Motor Care Ltd" /><h1>Oakland Motor Care Ltd.</h1><p className="muted">Receipt</p></div>
+        <div style={{ textAlign: 'right' }}>
+          <p className="print-field"><span>Receipt No</span><strong style={{ fontSize: 18 }}>{receipt.receipt_number}</strong></p>
+          <p className="print-field"><span>Date</span><strong>{formatDate(receipt.receipt_date)}</strong></p>
+        </div>
+      </div>
+      <div className="print-section">
+        <h4>Received from</h4>
+        <p className="print-field"><strong style={{ fontSize: 16 }}>{receipt.client_name}</strong></p>
+        {receipt.client_phone && <p className="print-field"><span>Phone</span><strong>{receipt.client_phone}</strong></p>}
+      </div>
+      <div className="print-section">
+        <h4>For</h4>
+        {loading ? <p className="muted">Loading…</p> : <table className="print-table">
+          <thead><tr><th style={{ width: '8%' }}>#</th><th style={{ width: '42%' }}>Description</th><th style={{ width: '15%' }}>Qty</th><th style={{ width: '17%' }}>Unit Price</th><th style={{ width: '18%' }}>Amount</th></tr></thead>
+          <tbody>
+            {items.map((i, idx) => <tr key={i.id}><td>{idx + 1}</td><td>{i.description}</td><td>{i.quantity}</td><td>{formatKes(i.unit_price_minor)}</td><td>{formatKes(i.line_total_minor)}</td></tr>)}
+            {Array.from({ length: blankRows }).map((_, idx) => <tr key={`blank-${idx}`}><td>{items.length + idx + 1}</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>)}
+          </tbody>
+        </table>}
+        <div className="print-totals"><table><tbody><tr><td><strong>Total received</strong></td><td><strong>{formatKes(receipt.total_minor)}</strong></td></tr></tbody></table></div>
+      </div>
+      <div className="print-section">
+        <p className="print-field"><span>Payment method</span><strong>{receipt.payment_method}</strong></p>
+        {receipt.notes && <p className="print-field"><span>Notes</span><strong>{receipt.notes}</strong></p>}
+      </div>
+      <div className="signature-grid" style={{ gridTemplateColumns: 'repeat(2,1fr)' }}>
+        <div className="signature-box">Received by<span>Signature</span></div>
+        <div className="signature-box">Customer<span>Signature</span></div>
+      </div>
+    </div>
+  </div>;
 }
 
 // === REPORTS ===

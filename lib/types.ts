@@ -210,6 +210,30 @@ export type Payment = {
   notes: string | null;
 };
 
+export type GeneralReceipt = {
+  id: string;
+  receipt_number: string;
+  receipt_date: string;
+  client_name: string;
+  client_phone: string | null;
+  payment_method: 'CASH' | 'MPESA' | 'BANK' | 'CARD' | 'OTHER';
+  total_minor: number;
+  notes: string | null;
+  created_by: string | null;
+  created_by_name: string | null;
+  created_at: string;
+};
+
+export type GeneralReceiptItem = {
+  id: string;
+  general_receipt_id: string;
+  description: string;
+  quantity: number;
+  unit_price_minor: number;
+  line_total_minor: number;
+  created_at: string;
+};
+
 export type Quotation = {
   id: string;
   quote_number: string;
