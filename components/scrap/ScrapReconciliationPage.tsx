@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { ScrapCurrentStockRow, ScrapStockAdjustment } from '@/lib/types';
 import { formatKes, formatKg, formatDate, localDateStr, downloadCSV } from '@/lib/formatting';
-import { byScrapTypeOrder } from '@/lib/constants';
+import { byScrapTypeOrder, SCRAP_RECONCILIATION_REASONS } from '@/lib/constants';
 import { Scale, AlertTriangle, TrendingDown, TrendingUp, Download, CircleDollarSign } from 'lucide-react';
 
 type ReconciliationAdjustment = ScrapStockAdjustment & { scrap_items: { name: string; current_rate_minor: number | null } | null };
@@ -14,8 +14,8 @@ export default function ScrapReconciliationPage({ can, onNotice }: { can: (p: st
   const [scrapItemId, setScrapItemId] = useState('');
   const [counted, setCounted] = useState('');
   const [date, setDate] = useState(localDateStr());
-  const [reason, setReason] = useState('');
-  const [authorizedBy, setAuthorizedBy] = useState('');
+  const [reasonCategory, setReasonCategory] = useState<string>(SCRAP_RECONCILIATION_REASONS[0]);
+  const [reasonCustom, setReasonCustom] = useState('');
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -42,6 +42,7 @@ export default function ScrapReconciliationPage({ can, onNotice }: { can: (p: st
   const selected = stock.find((s) => s.scrap_item_id === scrapItemId) ?? null;
   const countedNum = parseFloat(counted);
   const variance = selected && counted.trim() !== '' && !isNaN(countedNum) ? countedNum - selected.current_quantity : null;
+  const resolvedReason = reasonCategory === 'Other' && reasonCustom.trim() ? reasonCustom.trim() : reasonCategory;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setError('');
@@ -49,13 +50,13 @@ export default function ScrapReconciliationPage({ can, onNotice }: { can: (p: st
     if (counted.trim() === '' || isNaN(countedNum) || countedNum < 0) { setError('Enter the counted quantity.'); return; }
     setBusy(true);
     const { data, error: rpcError } = await supabase.rpc('scrap_record_stock_count', {
-      p_scrap_item_id: scrapItemId, p_counted_quantity: countedNum, p_reason: reason, p_authorized_by: authorizedBy, p_notes: notes || null, p_date: date,
+      p_scrap_item_id: scrapItemId, p_counted_quantity: countedNum, p_reason: resolvedReason, p_notes: notes || null, p_date: date,
     });
     setBusy(false);
     if (rpcError) { setError(rpcError.message || 'Unable to record the stock count.'); return; }
     const adj = data as ScrapStockAdjustment;
     onNotice(`${adj.adjustment_type === 'CORRECTION_DECREASE' ? 'Shortage' : 'Overage'} of ${formatKg(adj.quantity)} recorded for ${selected.name}.`);
-    setScrapItemId(''); setCounted(''); setReason(''); setAuthorizedBy(''); setNotes('');
+    setScrapItemId(''); setCounted(''); setReasonCategory(SCRAP_RECONCILIATION_REASONS[0]); setReasonCustom(''); setNotes('');
     setRefreshKey((k) => k + 1);
   }
 
@@ -96,11 +97,13 @@ export default function ScrapReconciliationPage({ can, onNotice }: { can: (p: st
               <label>Counted quantity (KG)<input type="number" min={0} step="0.01" value={counted} onChange={(e) => setCounted(e.target.value)} required disabled={!selected} /></label>
               <label>Date<input type="date" value={date} max={localDateStr()} onChange={(e) => setDate(e.target.value)} required /></label>
             </div>
-            <label>Reason<input value={reason} onChange={(e) => setReason(e.target.value)} required placeholder="e.g. Physical count during clearance" /></label>
-            <label>Authorized by<input value={authorizedBy} onChange={(e) => setAuthorizedBy(e.target.value)} required /></label>
+            <div className="form-row" style={{ gridTemplateColumns: reasonCategory === 'Other' ? '1fr 1fr' : '1fr' }}>
+              <label>Reason<select value={reasonCategory} onChange={(e) => setReasonCategory(e.target.value)}>{SCRAP_RECONCILIATION_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}</select></label>
+              {reasonCategory === 'Other' && <label>Specify<input value={reasonCustom} onChange={(e) => setReasonCustom(e.target.value)} required /></label>}
+            </div>
             <label>Notes <span className="optional">Optional</span><textarea value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
             {error && <div className="form-error"><AlertTriangle size={14} /> {error}</div>}
-            <button className="button primary wide" disabled={busy || !selected || variance === 0}>{busy ? 'Recording...' : 'Record reconciliation'}</button>
+            <button className="button primary wide" disabled={busy || !selected || variance === 0 || (reasonCategory === 'Other' && !reasonCustom.trim())}>{busy ? 'Recording...' : 'Record reconciliation'}</button>
           </form>
         </section>
       )}

@@ -98,6 +98,7 @@ export const INVOICE_STATUSES = ['DRAFT','ISSUED','PART_PAID','PAID','OVERDUE','
 
 export const SCRAP_EXPENSE_CATEGORIES = ['Water','Transaction / Withdrawal Fees','Transport','Loading','Other'] as const;
 export const STOCK_ADJUSTMENT_TYPES = ['CLEARANCE','OPENING','CORRECTION_INCREASE','CORRECTION_DECREASE'] as const;
+export const SCRAP_RECONCILIATION_REASONS = ['To Starting Stock','Error Margin','Other'] as const;
 export const STOCK_CYCLE_STATUSES = ['OPEN','CLOSED'] as const;
 
 // Joseph's paper/Excel scrap sheet always lists types in this order rather than
