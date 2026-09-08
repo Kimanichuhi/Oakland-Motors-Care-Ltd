@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { --navy:#10263f; --navy-2:#173a5e; --gold:#b98a3d; --ink:#172536; --muted:#718093; --line:#e7ebef; --surface:#fffaf4; --bg:#f6f8fa; --font-sans: 'Outfit', 'Segoe UI', Arial, sans-serif; }
+:root { --navy:#10263f; --navy-2:#173a5e; --gold:#b98a3d; --ink:#172536; --muted:#718093; --line:#e7ebef; --surface:#fffaf4; --bg:#f6f8fa; --font-sans: 'Poppins', 'Segoe UI', Arial, sans-serif; }
 * { box-sizing:border-box; }
 body { max-width:100%; overflow-x:hidden; }
 body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-sans); letter-spacing:0.01em; }
