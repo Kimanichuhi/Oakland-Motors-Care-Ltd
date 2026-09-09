@@ -1655,16 +1655,16 @@ function partStockStatus(p: Part): { label: string; className: string } {
 }
 
 function PartsSection({ onNew, onReceive, onAdjust, onSelect, can }: { onNew: () => void; onReceive: () => void; onAdjust: () => void; onSelect: (id: string) => void; can: (p: string) => boolean }) {
-  const [parts, setParts] = useState<Part[]>([]);
+  const [parts, setParts] = useState<(Part & { suppliers: { name: string } | null })[]>([]);
   const [performance, setPerformance] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   useEffect(() => {
     (async () => {
-      let q = supabase.from('parts').select('*').eq('active', true).order('name');
+      let q = supabase.from('parts').select('*, suppliers(name)').eq('active', true).order('name');
       if (query) q = q.or(`sku.ilike.%${query}%,name.ilike.%${query}%`);
       const { data } = await q.limit(200);
-      setParts((data ?? []) as Part[]); setLoading(false);
+      setParts((data ?? []) as (Part & { suppliers: { name: string } | null })[]); setLoading(false);
     })();
   }, [query]);
   useEffect(() => {
@@ -1684,28 +1684,30 @@ function PartsSection({ onNew, onReceive, onAdjust, onSelect, can }: { onNew: ()
     </div>
     {loading ? <Loading /> : parts.length === 0 ? <Empty title="No parts" text="Add your first part to inventory." /> : <>
       <div className="parts-table-wrap"><table className="report-table parts-table"><thead><tr>
-        <th>Part Name</th><th>Part Number</th><th className="numeric">Buying Price</th><th className="numeric">Selling Price</th><th className="numeric">Stock</th><th>Performance</th><th>Status</th><th>Category</th>
+        <th>Part/spare No</th><th>Description</th><th>Vehicle model &amp; part make</th><th>Remarks</th><th className="numeric">Quantity</th><th className="numeric">Unit Cost Price</th><th className="numeric">Total Stock price</th><th>Date Purchased</th><th>Supplier</th>
       </tr></thead><tbody>{parts.map((p) => {
-        const status = partStockStatus(p); const sold = performance[p.id] ?? 0;
+        const vehicleAndMake = [p.vehicle_model, p.brand].filter(Boolean).join(' · ');
         return <tr key={p.id} className="clickable" onClick={() => onSelect(p.id)}>
-          <td><strong>{p.name}</strong>{p.brand && <span className="table-subtext">{p.brand}</span>}</td>
           <td>{p.sku}</td>
-          <td className="numeric">{formatKes(p.cost_price_minor)}</td>
-          <td className="numeric">{formatKes(p.selling_price_minor)}</td>
+          <td><strong>{p.name}</strong></td>
+          <td>{vehicleAndMake || '—'}</td>
+          <td>{p.remarks || '—'}</td>
           <td className="numeric">{p.quantity_on_hand}</td>
-          <td>{sold > 0 ? <span className="performance-tag up"><TrendingUp size={13} /> {sold} sold (30d)</span> : <span className="performance-tag flat">No recent sales</span>}</td>
-          <td><span className={`status ${status.className}`}>{status.label}</span></td>
-          <td><span className="category-tag">{partCategoryType(p.category)}</span><span className="table-subtext">{p.category}</span></td>
+          <td className="numeric">{formatKes(p.cost_price_minor)}</td>
+          <td className="numeric">{formatKes(p.cost_price_minor * p.quantity_on_hand)}</td>
+          <td>{p.date_purchased ? formatDate(p.date_purchased) : '—'}</td>
+          <td>{p.suppliers?.name ?? '—'}</td>
         </tr>;
       })}</tbody></table></div>
       <div className="parts-card-grid">{parts.map((p) => {
         const status = partStockStatus(p); const sold = performance[p.id] ?? 0;
+        const vehicleAndMake = [p.vehicle_model, p.brand].filter(Boolean).join(' · ');
         return <button key={p.id} type="button" className="part-card" onClick={() => onSelect(p.id)}>
           <div className="part-card-top"><div className="job-icon"><Package size={17} /></div><span className={`status ${status.className}`}>{status.label}</span></div>
           <strong>{p.name}</strong>
-          <span className="part-card-meta">{p.sku} · {partCategoryType(p.category)}</span>
-          <div className="part-card-prices"><span>Buy {formatKes(p.cost_price_minor)}</span><span>Sell {formatKes(p.selling_price_minor)}</span></div>
-          <div className="part-card-foot"><span>{p.quantity_on_hand} in stock</span>{sold > 0 && <span className="performance-tag up"><TrendingUp size={12} /> {sold} sold</span>}</div>
+          <span className="part-card-meta">{p.sku}{vehicleAndMake ? ` · ${vehicleAndMake}` : ''}</span>
+          <div className="part-card-prices"><span>Unit cost {formatKes(p.cost_price_minor)}</span><span>Total {formatKes(p.cost_price_minor * p.quantity_on_hand)}</span></div>
+          <div className="part-card-foot"><span>{p.quantity_on_hand} in stock · {p.suppliers?.name ?? 'No supplier'}</span>{sold > 0 && <span className="performance-tag up"><TrendingUp size={12} /> {sold} sold</span>}</div>
         </button>;
       })}</div>
     </>}
@@ -1713,7 +1715,7 @@ function PartsSection({ onNew, onReceive, onAdjust, onSelect, can }: { onNew: ()
 }
 
 function PartDetail({ id, onBack, can, onNotice, onNavigateToSale, onNavigateToJob, onNavigateToPO }: { id: string; onBack: () => void; can: (p: string) => boolean; onNotice: (m: string) => void; onNavigateToSale?: (id: string) => void; onNavigateToJob?: (id: string) => void; onNavigateToPO?: (id: string) => void }) {
-  const [part, setPart] = useState<Part | null>(null);
+  const [part, setPart] = useState<(Part & { suppliers: { name: string } | null }) | null>(null);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [actorNames, setActorNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -1721,11 +1723,11 @@ function PartDetail({ id, onBack, can, onNotice, onNavigateToSale, onNavigateToJ
 
   const load = useCallback(async () => {
     const [{ data: partData }, { data: movementData }] = await Promise.all([
-      supabase.from('parts').select('*').eq('id', id).maybeSingle(),
+      supabase.from('parts').select('*, suppliers(name)').eq('id', id).maybeSingle(),
       supabase.from('stock_movements').select('*').eq('part_id', id).order('created_at', { ascending: false }).limit(30),
     ]);
     const movementRows = (movementData ?? []) as StockMovement[];
-    setPart(partData as Part | null); setMovements(movementRows); setLoading(false);
+    setPart(partData as (Part & { suppliers: { name: string } | null }) | null); setMovements(movementRows); setLoading(false);
     const userIds = Array.from(new Set(movementRows.map((m) => m.user_id).filter(Boolean))) as string[];
     if (userIds.length > 0) {
       const { data: profileRows } = await supabase.from('profiles').select('id,full_name').in('id', userIds);
@@ -1758,7 +1760,11 @@ function PartDetail({ id, onBack, can, onNotice, onNavigateToSale, onNavigateToJ
       <div className="info-card"><Boxes size={16} /> <div><span>Stock value (cost)</span><strong>{formatKes(stockValue)}</strong></div></div>
       <div className="info-card"><Package size={16} /> <div><span>Quantity on hand</span><strong>{part.quantity_on_hand}</strong></div></div>
       <div className="info-card"><AlertTriangle size={16} /> <div><span>Reorder level</span><strong>{part.reorder_level}</strong></div></div>
+      {(part.vehicle_model || part.brand) && <div className="info-card"><CarFront size={16} /> <div><span>Vehicle model &amp; part make</span><strong>{[part.vehicle_model, part.brand].filter(Boolean).join(' · ')}</strong></div></div>}
+      {part.suppliers?.name && <div className="info-card"><Truck size={16} /> <div><span>Supplier</span><strong>{part.suppliers.name}</strong></div></div>}
+      {part.date_purchased && <div className="info-card"><Calendar size={16} /> <div><span>Date purchased</span><strong>{formatDate(part.date_purchased)}</strong></div></div>}
       {part.location && <div className="info-card"><MapPin size={16} /> <div><span>Location</span><strong>{part.location}</strong></div></div>}
+      {part.remarks && <div className="info-card"><FileText size={16} /> <div><span>Remarks</span><strong>{part.remarks}</strong></div></div>}
       <div className="info-card"><ShieldCheck size={16} /> <div><span>Active</span><strong>{part.active ? 'Yes' : 'No'}</strong></div></div>
     </div>
     <section className="panel table-panel" style={{ marginTop: 20 }}>
@@ -3180,18 +3186,30 @@ function TechnicianForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m
 
 function PartForm({ part, onClose, onSaved }: { part?: Part; onClose: () => void; onSaved: (m: string) => void }) {
   const isEdit = !!part;
-  const [sku, setSku] = useState(part?.sku ?? ''); const [name, setName] = useState(part?.name ?? ''); const [category, setCategory] = useState(part?.category ?? 'General'); const [brand, setBrand] = useState(part?.brand ?? ''); const [supplierId, setSupplierId] = useState(part?.supplier_id ?? ''); const [suppliers, setSuppliers] = useState<Supplier[]>([]); const [costPrice, setCostPrice] = useState(part ? String(part.cost_price_minor / 100) : '0'); const [sellPrice, setSellPrice] = useState(part ? String(part.selling_price_minor / 100) : '0'); const [qty, setQty] = useState('0'); const [reorder, setReorder] = useState(part ? String(part.reorder_level) : '0'); const [location, setLocation] = useState(part?.location ?? ''); const [active, setActive] = useState(part?.active ?? true); const [busy, setBusy] = useState(false);
+  const [sku, setSku] = useState(part?.sku ?? ''); const [name, setName] = useState(part?.name ?? ''); const [category, setCategory] = useState(part?.category ?? 'General'); const [brand, setBrand] = useState(part?.brand ?? ''); const [vehicleMake, setVehicleMake] = useState(part?.vehicle_make ?? ''); const [vehicleModel, setVehicleModel] = useState(part?.vehicle_model ?? ''); const [supplierId, setSupplierId] = useState(part?.supplier_id ?? ''); const [suppliers, setSuppliers] = useState<Supplier[]>([]); const [costPrice, setCostPrice] = useState(part ? String(part.cost_price_minor / 100) : '0'); const [sellPrice, setSellPrice] = useState(part ? String(part.selling_price_minor / 100) : '0'); const [qty, setQty] = useState('0'); const [reorder, setReorder] = useState(part ? String(part.reorder_level) : '0'); const [location, setLocation] = useState(part?.location ?? ''); const [remarks, setRemarks] = useState(part?.remarks ?? ''); const [datePurchased, setDatePurchased] = useState(part?.date_purchased ?? ''); const [active, setActive] = useState(part?.active ?? true); const [busy, setBusy] = useState(false);
   useEffect(() => { supabase.from('suppliers').select('*').eq('status', 'ACTIVE').is('deleted_at', null).order('name').then(({ data }) => setSuppliers((data ?? []) as Supplier[])); }, []);
   async function submit(e: FormEvent) {
     e.preventDefault(); setBusy(true);
-    const payload = { sku, name, category, brand: brand || null, supplier_id: supplierId || null, cost_price_minor: Math.round(parseFloat(costPrice) * 100), selling_price_minor: Math.round(parseFloat(sellPrice) * 100), reorder_level: parseInt(reorder), location: location || null };
+    const payload = { sku, name, category, brand: brand || null, vehicle_make: vehicleMake || null, vehicle_model: vehicleModel || null, supplier_id: supplierId || null, cost_price_minor: Math.round(parseFloat(costPrice) * 100), selling_price_minor: Math.round(parseFloat(sellPrice) * 100), reorder_level: parseInt(reorder), location: location || null, remarks: remarks || null, date_purchased: datePurchased || null };
     const { error: partError } = isEdit
       ? await supabase.from('parts').update({ ...payload, active }).eq('id', part!.id)
       : await supabase.from('parts').insert({ ...payload, quantity_on_hand: parseInt(qty) });
     if (partError) { setBusy(false); onSaved(`Unable to ${isEdit ? 'update' : 'save'} part. Please try again.`); return; }
     onSaved(isEdit ? 'Part updated successfully.' : 'Part added successfully.');
   }
-  return <Modal title={isEdit ? 'Edit part' : 'Add part'} onClose={onClose}><form onSubmit={submit} className="modal-form"><label>SKU<input value={sku} onChange={(e) => setSku(e.target.value)} required placeholder="e.g. BP-001" /></label><label>Part name<input value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Brake pads" /></label><div className="form-row"><label>Category<input value={category} onChange={(e) => setCategory(e.target.value)} /></label><label>Brand<input value={brand} onChange={(e) => setBrand(e.target.value)} /></label></div><label>Supplier<span className="optional">Optional</span><select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}><option value="">No supplier</option>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label><div className="form-row"><label>Cost price (KES)<input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} required min="0" step="0.01" /></label><label>Selling price (KES)<input type="number" value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} required min="0" step="0.01" /></label></div><div className="form-row">{isEdit ? <label>Reorder level<input type="number" value={reorder} onChange={(e) => setReorder(e.target.value)} required min="0" /></label> : <><label>Quantity on hand<input type="number" value={qty} onChange={(e) => setQty(e.target.value)} required min="0" /></label><label>Reorder level<input type="number" value={reorder} onChange={(e) => setReorder(e.target.value)} required min="0" /></label></>}</div><label>Location/bin<input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Shelf A-3" /></label>{isEdit && <label>Active<span className="optional">Inactive parts are hidden from the parts list</span><select value={active ? '1' : '0'} onChange={(e) => setActive(e.target.value === '1')}><option value="1">Active</option><option value="0">Inactive</option></select></label>}{isEdit && <p className="muted" style={{ margin: 0 }}>Quantity on hand isn&apos;t edited here — use Receive stock or Adjust stock so the movement ledger stays accurate.</p>}<button className="button primary wide" disabled={busy}>{busy ? 'Saving...' : isEdit ? 'Save changes' : 'Save part'} <ArrowUpRight size={16} /></button></form></Modal>;
+  return <Modal title={isEdit ? 'Edit part' : 'Add part'} onClose={onClose}><form onSubmit={submit} className="modal-form">
+    <div className="form-row"><label>Part/spare No (SKU)<input value={sku} onChange={(e) => setSku(e.target.value)} required placeholder="e.g. BP-001" /></label><label>Description<input value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Brake pads" /></label></div>
+    <div className="form-row"><label>Category<input value={category} onChange={(e) => setCategory(e.target.value)} /></label><label>Part make (brand)<input value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="e.g. Bosch" /></label></div>
+    <div className="form-row"><label>Vehicle make <span className="optional">Optional</span><input value={vehicleMake} onChange={(e) => setVehicleMake(e.target.value)} placeholder="e.g. Toyota" /></label><label>Vehicle model <span className="optional">Optional</span><input value={vehicleModel} onChange={(e) => setVehicleModel(e.target.value)} placeholder="e.g. Corolla" /></label></div>
+    <label>Supplier<span className="optional">Optional</span><select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}><option value="">No supplier</option>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+    <div className="form-row"><label>Unit cost price (KES)<input type="number" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} required min="0" step="0.01" /></label><label>Selling price (KES)<input type="number" value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} required min="0" step="0.01" /></label></div>
+    <div className="form-row">{isEdit ? <label>Reorder level<input type="number" value={reorder} onChange={(e) => setReorder(e.target.value)} required min="0" /></label> : <><label>Quantity<input type="number" value={qty} onChange={(e) => setQty(e.target.value)} required min="0" /></label><label>Reorder level<input type="number" value={reorder} onChange={(e) => setReorder(e.target.value)} required min="0" /></label></>}</div>
+    <div className="form-row"><label>Date purchased <span className="optional">Optional</span><input type="date" value={datePurchased} onChange={(e) => setDatePurchased(e.target.value)} /></label><label>Location/bin <span className="optional">Optional</span><input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Shelf A-3" /></label></div>
+    <label>Remarks <span className="optional">Optional</span><textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} style={{ minHeight: 46 }} /></label>
+    {isEdit && <label>Active<span className="optional">Inactive parts are hidden from the parts list</span><select value={active ? '1' : '0'} onChange={(e) => setActive(e.target.value === '1')}><option value="1">Active</option><option value="0">Inactive</option></select></label>}
+    {isEdit && <p className="muted" style={{ margin: 0 }}>Quantity on hand isn&apos;t edited here — use Receive stock or Adjust stock so the movement ledger stays accurate.</p>}
+    <button className="button primary wide" disabled={busy}>{busy ? 'Saving...' : isEdit ? 'Save changes' : 'Save part'} <ArrowUpRight size={16} /></button>
+  </form></Modal>;
 }
 
 function SupplierForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string) => void }) {

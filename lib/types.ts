@@ -56,6 +56,8 @@ export type Part = {
   quantity_on_hand: number;
   reorder_level: number;
   location: string | null;
+  remarks: string | null;
+  date_purchased: string | null;
   active: boolean;
 };
 
