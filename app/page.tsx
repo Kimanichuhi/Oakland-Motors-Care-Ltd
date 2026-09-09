@@ -906,25 +906,13 @@ type JobExportRow = JobCard & {
   invoices: { status: string; total_minor: number; amount_paid_minor: number }[];
 };
 
-function computeJobBalance(j: JobExportRow, taxRate: number): number {
-  const labourTotal = (j.job_card_labour ?? []).reduce((s, l) => s + computeLineTotal(l.quantity, l.unit_price_minor, l.tax_rate), 0);
-  const partsTotal = (j.job_card_parts ?? []).reduce((s, p) => s + computeLineTotal(p.quantity, p.unit_price_minor, taxRate), 0);
-  const total = labourTotal + partsTotal + (j.other_charges_minor ?? 0);
-  const invoice = (j.invoices ?? []).find((inv) => inv.status !== 'VOID');
-  const amountPaid = invoice?.amount_paid_minor ?? 0;
-  return Math.max(0, total - amountPaid);
-}
-
 function JobsSection({ query, onNew, onSelect, onNotice, can }: { query: string; onNew: () => void; onSelect: (id: string) => void; onNotice: (m: string) => void; can: (p: string) => boolean }) {
-  const [jobs, setJobs] = useState<JobExportRow[]>([]);
+  const [jobs, setJobs] = useState<(JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [bucketFilter, setBucketFilter] = useState<string | null>(null);
-  const [debtOnly, setDebtOnly] = useState(false);
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [exporting, setExporting] = useState(false);
-  const [taxRate, setTaxRate] = useState(16);
-  useEffect(() => { void getTaxRate().then(setTaxRate); }, []);
 
   async function exportWorkOrdersCSV() {
     setExporting(true);
@@ -973,19 +961,14 @@ function JobsSection({ query, onNew, onSelect, onNotice, can }: { query: string;
   }, [jobs.length]);
   useEffect(() => {
     (async () => {
-      let q = supabase.from('job_cards').select('*, vehicles(registration_number,make,model), customers(full_name,phone), job_card_labour(quantity,unit_price_minor,tax_rate), job_card_parts(quantity,unit_price_minor), job_card_signoffs(role,name), invoices(status,total_minor,amount_paid_minor)').is('deleted_at', null).order('created_at', { ascending: false });
+      let q = supabase.from('job_cards').select('*, vehicles(registration_number), customers(full_name)').is('deleted_at', null).order('created_at', { ascending: false });
       if (bucketFilter) q = q.in('status', JOB_STATUS_BUCKETS.find((b) => b.key === bucketFilter)?.statuses ?? []);
       else if (statusFilter !== 'ALL') q = q.eq('status', statusFilter);
       if (query) q = q.or(`job_number.ilike.%${query}%,complaint.ilike.%${query}%`);
       const { data } = await q.limit(100);
-      setJobs((data ?? []) as unknown as JobExportRow[]); setLoading(false);
+      setJobs((data ?? []) as (JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[]); setLoading(false);
     })();
   }, [query, statusFilter, bucketFilter]);
-
-  const jobsWithBalance = jobs.map((j) => ({ job: j, balance: computeJobBalance(j, taxRate) }));
-  const debtCount = jobsWithBalance.filter((r) => r.balance > 0).length;
-  const totalDebt = jobsWithBalance.reduce((s, r) => s + r.balance, 0);
-  const visibleJobs = debtOnly ? jobsWithBalance.filter((r) => r.balance > 0) : jobsWithBalance;
 
   return <SectionPanel eyebrow="Workshop execution" title="Work Orders" onNew={can('job.create') ? onNew : undefined} newLabel="New work order">
     <div className="action-buttons" style={{ marginBottom: 16 }}>
@@ -996,16 +979,11 @@ function JobsSection({ query, onNew, onSelect, onNotice, can }: { query: string;
       return <button key={b.key} className="metric-card" style={{ textAlign: 'left', cursor: 'pointer', outline: bucketFilter === b.key ? '2px solid var(--gold)' : 'none' }} onClick={() => { setBucketFilter(bucketFilter === b.key ? null : b.key); setStatusFilter('ALL'); }}>
         <div className="metric-copy"><span>{b.label}</span><strong>{count}</strong></div>
       </button>;
-    })}
-      <button className="metric-card" style={{ textAlign: 'left', cursor: 'pointer', outline: debtOnly ? '2px solid var(--gold)' : 'none' }} onClick={() => setDebtOnly((v) => !v)}>
-        <div className="metric-icon gold"><AlertTriangle size={18} /></div>
-        <div className="metric-copy"><span>Outstanding debt</span><strong style={{ color: totalDebt > 0 ? '#a4493d' : undefined }}>{formatKes(totalDebt)}</strong><small>{debtCount} job{debtCount === 1 ? '' : 's'} owe money</small></div>
-      </button>
-    </div>
-    <div className="filter-bar"><Filter size={15} /><select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setBucketFilter(null); }}><option value="ALL">All statuses</option>{Object.keys(JOB_TRANSITIONS).map((s) => <option key={s} value={s}>{s.replaceAll('_', ' ')}</option>)}</select>{bucketFilter && <button className="text-button" onClick={() => setBucketFilter(null)}>Clear filter</button>}{debtOnly && <button className="text-button" onClick={() => setDebtOnly(false)}>Clear debt filter</button>}</div>
-    {loading ? <Loading /> : visibleJobs.length === 0 ? <Empty title={debtOnly ? 'No outstanding debt' : 'No active work orders'} text={debtOnly ? 'Every work order in this view is fully paid.' : 'Create a work order when a vehicle arrives.'} /> : <div className="report-table-wrap"><table className="report-table"><thead><tr>
-      <th>Job Number</th><th>Date</th><th>Vehicle</th><th>Customer</th><th>Complaint</th><th>Priority</th><th>Status</th><th>Balance Due</th><th />
-    </tr></thead><tbody>{visibleJobs.map(({ job: j, balance }) => <tr key={j.id} className="clickable" onClick={() => onSelect(j.id)}>
+    })}</div>
+    <div className="filter-bar"><Filter size={15} /><select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setBucketFilter(null); }}><option value="ALL">All statuses</option>{Object.keys(JOB_TRANSITIONS).map((s) => <option key={s} value={s}>{s.replaceAll('_', ' ')}</option>)}</select>{bucketFilter && <button className="text-button" onClick={() => setBucketFilter(null)}>Clear filter</button>}</div>
+    {loading ? <Loading /> : jobs.length === 0 ? <Empty title="No active work orders" text="Create a work order when a vehicle arrives." /> : <div className="report-table-wrap"><table className="report-table"><thead><tr>
+      <th>Job Number</th><th>Date</th><th>Vehicle</th><th>Customer</th><th>Complaint</th><th>Priority</th><th>Status</th><th />
+    </tr></thead><tbody>{jobs.map((j) => <tr key={j.id} className="clickable" onClick={() => onSelect(j.id)}>
       <td><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><div className="job-icon"><Wrench size={17} /></div><strong>{j.job_number}</strong></div></td>
       <td>{formatDate(j.created_at)}</td>
       <td>{j.vehicles?.registration_number ?? '—'}</td>
@@ -1013,7 +991,6 @@ function JobsSection({ query, onNew, onSelect, onNotice, can }: { query: string;
       <td>{j.complaint}</td>
       <td><span className={`status ${PRIORITY_STYLES[j.priority] ?? ''}`}>{j.priority}</span></td>
       <td><span className={`status ${statusStyles[j.status] ?? ''}`}>{j.status.replaceAll('_', ' ')}</span></td>
-      <td>{balance > 0 ? <span style={{ fontWeight: 800, color: '#a4493d' }}>{formatKes(balance)}</span> : <span className="muted">Paid</span>}</td>
       <td><ChevronRight size={17} className="row-arrow" /></td>
     </tr>)}</tbody></table></div>}
   </SectionPanel>;
