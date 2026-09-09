@@ -1,8 +1,21 @@
 import React, { useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { parseCSVRows } from '@/lib/csv';
-import { formatKes, formatDate, displayToMinor } from '@/lib/formatting';
-import { Upload, X, AlertTriangle, CheckCircle2, FileText } from 'lucide-react';
+import { formatKes, formatDate, displayToMinor, downloadCSV } from '@/lib/formatting';
+import { Upload, Download, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
+
+function downloadTemplate() {
+  downloadCSV('Oakland_Parts_Upload_Template.csv', [{
+    'Part/spare No': 'BP-001',
+    'Description': 'Brake pads',
+    'Vehicle model & part make': 'Corolla · Bosch',
+    'Remarks': '',
+    'Quantity': 10,
+    'Unit Cost Price': '850.00',
+    'Date Purchased': '2026-08-01',
+    'Supplier': '',
+  }]);
+}
 
 type ExistingPart = {
   id: string; sku: string; quantity_on_hand: number; cost_price_minor: number;
@@ -208,12 +221,12 @@ export default function BulkPartsUploadDialog({ onClose, onSaved }: { onClose: (
 
         {!planned && !parsing && (
           <div className="modal-form">
-            <p className="muted" style={{ margin: 0 }}>
-              Upload a CSV with the same columns as the Parts table: <strong>Part/spare No, Description, Vehicle model &amp; part make (or separate Vehicle Model / Part Make columns), Remarks, Quantity, Unit Cost Price, Date Purchased, Supplier</strong>.
-              Rows matching an existing Part/spare No update that part; unrecognized numbers are created new. Blank cells leave the existing value unchanged. Quantity changes go through the same audited stock-adjustment ledger as Adjust Stock, so nothing bypasses it.
-            </p>
+            <p className="muted" style={{ margin: 0 }}>Match an existing Part/spare No to update that part; a new one creates a part. Blank cells leave existing values unchanged.</p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" className="button secondary wide" onClick={downloadTemplate}><Download size={16} /> Download template</button>
+              <button type="button" className="button primary wide" onClick={() => fileInputRef.current?.click()}><Upload size={16} /> Choose CSV file</button>
+            </div>
             <input ref={fileInputRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleFile(f); }} />
-            <button type="button" className="button primary wide" onClick={() => fileInputRef.current?.click()}><Upload size={16} /> Choose CSV file</button>
             {parseError && <div className="form-error">{parseError}</div>}
           </div>
         )}
@@ -261,10 +274,6 @@ export default function BulkPartsUploadDialog({ onClose, onSaved }: { onClose: (
             </div>
             <button type="button" className="button primary wide" onClick={onClose}>Close</button>
           </div>
-        )}
-
-        {!planned && !parsing && (
-          <p className="muted" style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 6 }}><FileText size={13} /> Tip: use &quot;Export CSV&quot; on the Parts list first — edit that file and re-upload it here.</p>
         )}
       </div>
     </div>
