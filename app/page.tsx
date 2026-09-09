@@ -286,7 +286,7 @@ export default function Home() {
       <nav className="nav-list">
         {visibleNav.map((group, gi) => <div key={gi} className="nav-group">
           {group.label && <p className="nav-label">{group.label}</p>}
-          {group.items.map((item) => <button key={item.id} className={section === item.id ? 'nav-item active' : 'nav-item'} onClick={() => { setSection(item.id); setShowMobileNav(false); setSelectedJobId(null); setSelectedVehicleId(null); setSelectedCustomerId(null); setSelectedInvoiceId(null); setSelectedQuotationId(null); setSelectedPOId(null); setSelectedSupplierId(null); setSelectedSaleId(null); setSelectedPartId(null); setSelectedTechnicianId(null); }}>{item.icon}{item.label}</button>)}
+          {group.items.map((item) => <button key={item.id} className={section === item.id ? 'nav-item active' : 'nav-item'} onClick={() => { setSection(item.id); setShowMobileNav(false); setSelectedJobId(null); setSelectedVehicleId(null); setSelectedCustomerId(null); setSelectedInvoiceId(null); setSelectedQuotationId(null); setSelectedPOId(null); setSelectedSupplierId(null); setSelectedSaleId(null); setSelectedPartId(null); setSelectedTechnicianId(null); }}>{item.icon}<span className="flex-1">{item.label}</span>{item.id === 'notifications' && unreadCount > 0 && <span className="badge-count">{unreadCount > 99 ? '99+' : unreadCount}</span>}</button>)}
         </div>)}
       </nav>
       <div className="sidebar-bottom">
@@ -315,7 +315,7 @@ export default function Home() {
         </div>
         <div className="topbar-actions">
           <div className={`connection ${online ? '' : 'offline'}`}><span className={online ? 'online-dot' : 'offline-dot'} /> {online ? 'Online' : 'Offline'}</div>
-          <button className="icon-button" onClick={() => setSection('notifications')}><Bell size={19} />{unreadCount > 0 && <i />}</button>
+          <button className="icon-button" onClick={() => setSection('notifications')}><Bell size={19} />{unreadCount > 0 && <span className="badge-count icon-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}</button>
           <div className="top-avatar">{(userPerms.fullName || 'A').slice(0, 1).toUpperCase()}</div>
           <button className="mobile-menu" onClick={() => setShowMobileNav(!showMobileNav)}><Menu size={20} /></button>
         </div>
@@ -2846,7 +2846,7 @@ function NotificationsSection({ onRefresh, can, onSelectInvoice }: { onRefresh: 
       <div className="panel-heading"><div><p className="eyebrow">Not stored — computed live</p><h3>Overdue Invoices ({overdueInvoices.length})</h3></div></div>
       <div className="data-table">{overdueInvoices.map((inv) => <div className="table-row clickable" key={inv.id} onClick={() => onSelectInvoice(inv.id)}><div className="job-icon"><AlertTriangle size={17} /></div><div><strong>{inv.invoice_number}</strong><span>{inv.customers?.full_name ?? 'Customer'} · Due {formatDate(inv.due_date)}</span></div><span className="table-muted">{formatKes(inv.total_minor - inv.amount_paid_minor)} outstanding</span><span className="status bg-red-50 text-red-700">OVERDUE</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>
     </section>}
-    <SectionPanel eyebrow="Alerts" title="Notifications">
+    <SectionPanel eyebrow="Alerts" title={notifications.filter((n) => !n.read_at).length > 0 ? `Notifications (${notifications.filter((n) => !n.read_at).length} unread)` : 'Notifications'}>
       {loading ? <Loading /> : notifications.length === 0 ? <Empty title="No notifications" text="You're all caught up." /> : <div className="data-table">{notifications.map((n) => <div className={`table-row ${n.read_at ? 'read' : 'unread'}`} key={n.id} onClick={() => { if (!n.read_at) void markRead(n.id); }}><div className="job-icon"><Bell size={17} /></div><div><strong>{n.title}</strong><span>{n.message}</span></div><span className="table-muted">{formatDateTime(n.created_at)}</span>{!n.read_at && <span className="status bg-blue-50 text-blue-700">New</span>}</div>)}</div>}
     </SectionPanel>
   </>;
