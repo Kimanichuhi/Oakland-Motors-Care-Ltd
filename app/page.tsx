@@ -11,7 +11,7 @@ import type { Customer, Vehicle, Service, Part, Supplier, JobCard, JobCardLabour
 import {
   ArrowUpRight, Bell, CarFront, CheckCircle2, CircleDollarSign, ClipboardList, Gauge,
   LayoutDashboard, LogOut, Menu, Package, Plus, Search, Settings, ShieldCheck, Sparkles, Users,
-  Wrench, X, FileText, Truck, ShoppingCart, Receipt, ScrollText, UserCog, AlertTriangle,
+  Wrench, X, FileText, Truck, ShoppingCart, Receipt, ScrollText, UserCog, AlertTriangle, Upload,
   TrendingUp, Download, Eye, EyeOff, Edit, Archive, Trash2, Phone, Mail, MapPin, Filter, ChevronRight,
   Briefcase, Boxes, Store, Banknote, Smartphone, FileCheck, Clock, Activity, Calendar, Printer, Recycle, DoorOpen, Ban, Circle, Scale,
 } from 'lucide-react';
@@ -26,6 +26,7 @@ import ScrapReconciliationPage from '@/components/scrap/ScrapReconciliationPage'
 import ScrapFinancesPage from '@/components/scrap/ScrapFinancesPage';
 import ScrapReportsPage from '@/components/scrap/ScrapReportsPage';
 import ScrapTypesPage from '@/components/scrap/ScrapTypesPage';
+import BulkPartsUploadDialog from '@/components/parts/BulkPartsUpload';
 import DebtsOverviewPage from '@/components/debts/DebtsOverviewPage';
 import DebtRegisterPage from '@/components/debts/DebtRegisterPage';
 import DebtReportsPage from '@/components/debts/DebtReportsPage';
@@ -454,7 +455,7 @@ function SectionRouter(props: SectionProps) {
       onNavigateToSale={(saleId) => { p.setSelectedSaleId(saleId); p.setSection('sales'); }}
       onNavigateToJob={(jobId) => { p.setSelectedJobId(jobId); p.setSection('jobcards'); }}
       onNavigateToPO={(poId) => { p.setSelectedPOId(poId); p.setSection('procurement'); }}
-    /> : <PartsSection onNew={() => p.setShowPartForm(true)} onReceive={() => p.setShowStockReceiveForm(true)} onAdjust={() => p.setShowStockAdjustForm(true)} onSelect={(id) => p.setSelectedPartId(id)} can={p.can} />;
+    /> : <PartsSection onNew={() => p.setShowPartForm(true)} onReceive={() => p.setShowStockReceiveForm(true)} onAdjust={() => p.setShowStockAdjustForm(true)} onSelect={(id) => p.setSelectedPartId(id)} can={p.can} onNotice={p.onNotice} />;
     case 'stockmovements': return <StockMovementsSection
       onSelectPart={(id) => { p.setSelectedPartId(id); p.setSection('parts'); }}
       onNavigateToSale={(id) => { p.setSelectedSaleId(id); p.setSection('sales'); }}
@@ -1654,11 +1655,28 @@ function partStockStatus(p: Part): { label: string; className: string } {
   return { label: 'In stock', className: 'bg-emerald-50 text-emerald-700' };
 }
 
-function PartsSection({ onNew, onReceive, onAdjust, onSelect, can }: { onNew: () => void; onReceive: () => void; onAdjust: () => void; onSelect: (id: string) => void; can: (p: string) => boolean }) {
+function PartsSection({ onNew, onReceive, onAdjust, onSelect, can, onNotice }: { onNew: () => void; onReceive: () => void; onAdjust: () => void; onSelect: (id: string) => void; can: (p: string) => boolean; onNotice: (m: string) => void }) {
   const [parts, setParts] = useState<(Part & { suppliers: { name: string } | null })[]>([]);
   const [performance, setPerformance] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const canBulkUpload = can('inventory.create') && can('inventory.update') && can('inventory.adjust');
+
+  function exportPartsCSV() {
+    downloadCSV(`Oakland_Parts_${new Date().toISOString().slice(0, 10)}.csv`, parts.map((p) => ({
+      'Part/spare No': p.sku,
+      'Description': p.name,
+      'Vehicle model & part make': [p.vehicle_model, p.brand].filter(Boolean).join(' · '),
+      'Remarks': p.remarks ?? '',
+      'Quantity': p.quantity_on_hand,
+      'Unit Cost Price': (p.cost_price_minor / 100).toFixed(2),
+      'Total Stock price': ((p.cost_price_minor * p.quantity_on_hand) / 100).toFixed(2),
+      'Date Purchased': p.date_purchased ?? '',
+      'Supplier': p.suppliers?.name ?? '',
+    })));
+  }
   useEffect(() => {
     (async () => {
       let q = supabase.from('parts').select('*, suppliers(name)').eq('active', true).order('name');
@@ -1666,7 +1684,7 @@ function PartsSection({ onNew, onReceive, onAdjust, onSelect, can }: { onNew: ()
       const { data } = await q.limit(200);
       setParts((data ?? []) as (Part & { suppliers: { name: string } | null })[]); setLoading(false);
     })();
-  }, [query]);
+  }, [query, refreshKey]);
   useEffect(() => {
     (async () => {
       const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -1681,7 +1699,10 @@ function PartsSection({ onNew, onReceive, onAdjust, onSelect, can }: { onNew: ()
     <div className="action-buttons" style={{ marginBottom: 16 }}>
       {can('inventory.receive') && <button className="button secondary small" onClick={onReceive}><Plus size={15} /> Receive stock</button>}
       {can('inventory.adjust') && <button className="button secondary small" onClick={onAdjust}><Edit size={15} /> Adjust stock</button>}
+      <button className="button secondary small" disabled={parts.length === 0} onClick={exportPartsCSV}><Download size={15} /> Export CSV</button>
+      {canBulkUpload && <button className="button secondary small" onClick={() => setShowBulkUpload(true)}><Upload size={15} /> Bulk upload</button>}
     </div>
+    {showBulkUpload && <BulkPartsUploadDialog onClose={() => setShowBulkUpload(false)} onSaved={(m) => { onNotice(m); setRefreshKey((k) => k + 1); }} />}
     {loading ? <Loading /> : parts.length === 0 ? <Empty title="No parts" text="Add your first part to inventory." /> : <>
       <div className="parts-table-wrap"><table className="report-table parts-table"><thead><tr>
         <th>Part/spare No</th><th>Description</th><th>Vehicle model &amp; part make</th><th>Remarks</th><th className="numeric">Quantity</th><th className="numeric">Unit Cost Price</th><th className="numeric">Total Stock price</th><th>Date Purchased</th><th>Supplier</th>
