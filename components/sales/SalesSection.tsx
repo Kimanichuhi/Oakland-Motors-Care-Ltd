@@ -230,7 +230,28 @@ function SalesPrintView({ rows, filterLabel, onClose }: { rows: { sale: SaleRow;
         <div className="print-header">
           <div><h1>Oakland Motor Care Ltd.</h1><p className="muted">Spares Sales Day Book</p><p className="muted">{filterLabel}</p></div>
         </div>
-        <table className="print-table" style={{ fontSize: 10 }}>
+        <table className="print-table" style={{ fontSize: 9 }}>
+          <colgroup>
+            <col style={{ width: '6%' }} />
+            <col style={{ width: '3%' }} />
+            <col style={{ width: '8%' }} />
+            <col style={{ width: '5%' }} />
+            <col style={{ width: '6%' }} />
+            <col style={{ width: '6%' }} />
+            <col style={{ width: '10%' }} />
+            <col style={{ width: '3%' }} />
+            <col style={{ width: '5%' }} />
+            <col style={{ width: '5%' }} />
+            <col style={{ width: '5%' }} />
+            <col style={{ width: '5%' }} />
+            <col style={{ width: '5%' }} />
+            <col style={{ width: '7%' }} />
+            <col style={{ width: '4%' }} />
+            <col style={{ width: '4%' }} />
+            <col style={{ width: '4%' }} />
+            <col style={{ width: '4%' }} />
+            <col style={{ width: '5%' }} />
+          </colgroup>
           <thead>
             <tr>
               <th>Date</th>

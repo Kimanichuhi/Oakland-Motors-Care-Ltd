@@ -45,12 +45,25 @@ export function addDaysLocal(dateStr: string, days: number): string {
   return localDateStr(dt);
 }
 
+/** RFC4180 field escaping — only quotes a field when it actually needs it (contains a
+ * comma, quote, or newline), and escapes an embedded quote as "" per the spec (not \",
+ * which Excel doesn't understand and which corrupted the cell boundary for any field
+ * with a literal quote in it, e.g. a remark). */
+function csvField(value: unknown): string {
+  const str = value === null || value === undefined ? '' : String(value);
+  return /[",\r\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+}
+
 export function downloadCSV(filename: string, rows: Record<string, unknown>[]) {
   if (rows.length === 0) return;
   const headers = Object.keys(rows[0]);
-  const body = rows.map((row) => headers.map((h) => JSON.stringify(row[h] ?? '')).join(','));
-  const csv = [headers.join(','), ...body].join('\n');
-  const blob = new Blob([csv], { type: 'text/csv' });
+  const body = rows.map((row) => headers.map((h) => csvField(row[h])).join(','));
+  const csv = [headers.join(','), ...body].join('\r\n');
+  // Leading BOM tells Excel this file is UTF-8 — without it, Excel falls back to the
+  // system codepage and mangles any non-ASCII character (—, ·, the non-breaking space
+  // Intl.NumberFormat sometimes inserts into currency strings) into garbled bytes.
+  const BOM = String.fromCharCode(0xfeff);
+  const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
