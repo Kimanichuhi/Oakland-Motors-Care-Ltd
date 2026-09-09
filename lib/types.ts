@@ -316,6 +316,11 @@ export type Sale = {
   salesperson_name: string | null;
   technician_id: string | null;
   technician_name: string | null;
+  vehicle_reg: string | null;
+  vehicle_model: string | null;
+  change_in_days: number;
+  labour_minor: number;
+  notes: string | null;
   payment_method: 'CASH' | 'MPESA' | 'BANK' | 'CARD' | 'CREDIT' | 'JOB_CARD' | 'OTHER';
   payment_status: 'PAID' | 'PARTIAL' | 'PENDING';
   status: 'COMPLETED' | 'PARTIALLY_RETURNED' | 'RETURNED' | 'VOIDED';
@@ -345,6 +350,8 @@ export type SaleItem = {
   unit_price_minor: number;
   line_total_minor: number;
   returned_quantity: number;
+  shelf_count_at_sale: number | null;
+  system_stock_after: number | null;
   created_at: string;
 };
 

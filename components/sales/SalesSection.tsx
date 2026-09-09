@@ -5,7 +5,8 @@ import { formatKes, formatDateTime, downloadCSV, localDateStr } from '@/lib/form
 import { statusStyles } from '@/lib/constants';
 import { Plus, Search, MoreVertical, Eye, Download, Printer, X } from 'lucide-react';
 
-type SaleRow = Sale & { job_cards: { job_number: string } | null; sale_items: { part_name: string; quantity: number }[] };
+type SaleItemRow = { part_name: string; part_sku: string; quantity: number; unit_price_minor: number; line_total_minor: number; shelf_count_at_sale: number | null; system_stock_after: number | null };
+type SaleRow = Sale & { job_cards: { job_number: string } | null; sale_items: SaleItemRow[] };
 
 const CUSTOMER_TYPE_LABELS: Record<string, string> = {
   WALK_IN: 'Walk In',
@@ -16,14 +17,45 @@ const CUSTOMER_TYPE_LABELS: Record<string, string> = {
   OTHER: 'Other',
 };
 
-function productSummary(items: { part_name: string; quantity: number }[]): string {
+function productSummary(items: SaleItemRow[]): string {
   if (items.length === 0) return '—';
   if (items.length === 1) return items[0].part_name;
   return `${items[0].part_name} +${items.length - 1} more`;
 }
 
-function totalQuantity(items: { part_name: string; quantity: number }[]): number {
+function totalQuantity(items: SaleItemRow[]): number {
   return items.reduce((sum, it) => sum + it.quantity, 0);
+}
+
+function paymentSummary(s: Sale): string {
+  const amount = formatKes(s.amount_paid_minor);
+  if (s.payment_method === 'MPESA') return `M-Pesa ${s.payment_reference ?? ''} · ${amount}`.trim();
+  if (s.payment_method === 'BANK') return `Banked${s.payment_reference ? ' ' + s.payment_reference : ''} · ${amount}`;
+  if (s.payment_method === 'CASH') return `Cash · ${amount}`;
+  return `${s.payment_method.replaceAll('_', ' ')} · ${amount}`;
+}
+
+function joinField(items: SaleItemRow[], pick: (i: SaleItemRow) => string | number | null): string {
+  return items.map((i) => { const v = pick(i); return v === null || v === '' ? '—' : String(v); }).join('; ');
+}
+
+/** Groups rows by local sale day and returns each row tagged with its day's grand
+ * total, populated only on the last row of each day — matching how the paper book
+ * carries a single "Day Total" written once at the end of each day's entries. */
+function withDayTotals(rows: SaleRow[]): { sale: SaleRow; dayTotalMinor: number | null }[] {
+  const byDay = new Map<string, SaleRow[]>();
+  for (const s of rows) {
+    const day = localDateStr(new Date(s.sale_date));
+    byDay.set(day, [...(byDay.get(day) ?? []), s]);
+  }
+  const out: { sale: SaleRow; dayTotalMinor: number | null }[] = [];
+  for (const s of rows) {
+    const day = localDateStr(new Date(s.sale_date));
+    const dayRows = byDay.get(day) ?? [];
+    const isLastOfDay = dayRows[dayRows.length - 1]?.id === s.id;
+    out.push({ sale: s, dayTotalMinor: isLastOfDay ? dayRows.reduce((sum, r) => sum + r.total_minor, 0) : null });
+  }
+  return out;
 }
 
 function SaleRowMenu({ onView }: { onView: () => void }) {
@@ -53,7 +85,7 @@ export default function SalesSection({ query, onNew, onSelect, can }: { query: s
     let mounted = true;
     async function load() {
       setLoading(true);
-      let q = supabase.from('sales').select('*, job_cards(job_number), sale_items(part_name, quantity)').order('sale_date', { ascending: false }).limit(200);
+      let q = supabase.from('sales').select('*, job_cards(job_number), sale_items(part_name, part_sku, quantity, unit_price_minor, line_total_minor, shelf_count_at_sale, system_stock_after)').order('sale_date', { ascending: false }).limit(200);
       if (query) q = q.or(`sale_number.ilike.%${query}%,customer_name.ilike.%${query}%,customer_phone.ilike.%${query}%`);
       const { data, error } = await q;
       if (!mounted) return;
@@ -76,22 +108,40 @@ export default function SalesSection({ query, onNew, onSelect, can }: { query: s
     });
   }, [sales, fromDate, toDate, productFilter]);
 
+  // Day totals read naturally in chronological order within each day; the list itself stays newest-first.
+  const chronological = useMemo(() => [...filteredSales].sort((a, b) => a.sale_date.localeCompare(b.sale_date)), [filteredSales]);
+  const dayTotalBySaleId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const { sale, dayTotalMinor } of withDayTotals(chronological)) if (dayTotalMinor !== null) map.set(sale.id, dayTotalMinor);
+    return map;
+  }, [chronological]);
+
   const filterLabel = [
     fromDate || toDate ? `${fromDate || 'earliest'} to ${toDate || 'latest'}` : 'All dates',
     productFilter.trim() ? `Product: "${productFilter.trim()}"` : null,
   ].filter(Boolean).join(' · ');
 
   function exportCSV() {
-    downloadCSV(`Oakland_Sales_${new Date().toISOString().slice(0, 10)}.csv`, filteredSales.map((s) => ({
-      Date: formatDateTime(s.sale_date),
-      'Sales ID': s.sale_number,
-      'Work Order No.': s.job_cards?.job_number ?? '',
-      Customer: CUSTOMER_TYPE_LABELS[s.customer_type] ?? s.customer_type,
-      Product: s.sale_items.map((it) => it.part_name).join('; '),
-      Quantity: totalQuantity(s.sale_items),
-      'Total (KES)': (s.total_minor / 100).toFixed(2),
-      'M-Pesa Code': s.payment_reference ?? '',
-      Status: s.status,
+    downloadCSV(`Oakland_Sales_${new Date().toISOString().slice(0, 10)}.csv`, withDayTotals(chronological).map(({ sale: s, dayTotalMinor }) => ({
+      'Date': localDateStr(new Date(s.sale_date)),
+      'Change in days': s.change_in_days,
+      'Customer Name': s.customer_name ?? '',
+      'Vehicle': s.vehicle_reg ?? '',
+      'Vehicle model': s.vehicle_model ?? '',
+      'Part/spare No': joinField(s.sale_items, (i) => i.part_sku),
+      'Description-& part make': joinField(s.sale_items, (i) => i.part_name),
+      'Quantity sold': totalQuantity(s.sale_items),
+      'PRICE': joinField(s.sale_items, (i) => (i.unit_price_minor / 100).toFixed(2)),
+      'Spares Total': (s.subtotal_minor / 100).toFixed(2),
+      'Labour/Service': (s.labour_minor / 100).toFixed(2),
+      'TOTAL': (s.total_minor / 100).toFixed(2),
+      'Day Total': dayTotalMinor !== null ? (dayTotalMinor / 100).toFixed(2) : '',
+      'CASH/MPESA/BANKED': paymentSummary(s),
+      'DEBT': (s.balance_minor / 100).toFixed(2),
+      'JOBCARD NO': s.job_cards?.job_number ?? '',
+      'REMAINING STOCK AT SHELVES': joinField(s.sale_items, (i) => i.shelf_count_at_sale),
+      'SYSTEM REMAINING STOCK': joinField(s.sale_items, (i) => i.system_stock_after),
+      'Remarks': s.notes ?? '',
     })));
   }
 
@@ -126,10 +176,12 @@ export default function SalesSection({ query, onNew, onSelect, can }: { query: s
                   <th>Sales ID</th>
                   <th>Work Order No.</th>
                   <th>Customer</th>
+                  <th>Vehicle</th>
                   <th>Product</th>
                   <th className="numeric">Quantity</th>
                   <th className="numeric">Total</th>
-                  <th>M-Pesa Code</th>
+                  <th className="numeric">Debt</th>
+                  <th>Cash/M-Pesa/Banked</th>
                   <th>Status</th>
                   <th />
                 </tr>
@@ -140,11 +192,13 @@ export default function SalesSection({ query, onNew, onSelect, can }: { query: s
                     <td>{formatDateTime(s.sale_date)}</td>
                     <td>{s.sale_number}</td>
                     <td>{s.job_cards?.job_number ?? '—'}</td>
-                    <td>{CUSTOMER_TYPE_LABELS[s.customer_type] ?? s.customer_type.replaceAll('_', ' ')}</td>
+                    <td>{s.customer_name || CUSTOMER_TYPE_LABELS[s.customer_type] || s.customer_type.replaceAll('_', ' ')}</td>
+                    <td>{s.vehicle_reg ?? '—'}</td>
                     <td>{productSummary(s.sale_items)}</td>
                     <td className="numeric">{totalQuantity(s.sale_items)}</td>
                     <td className="numeric">{formatKes(s.total_minor)}</td>
-                    <td>{s.payment_reference ?? '—'}</td>
+                    <td className="numeric" style={s.balance_minor > 0 ? { color: '#a4493d', fontWeight: 700 } : undefined}>{formatKes(s.balance_minor)}</td>
+                    <td>{paymentSummary(s)}</td>
                     <td><span className={`status ${statusStyles[s.status] ?? ''}`}>{s.status.replaceAll('_', ' ')}</span></td>
                     <td><SaleRowMenu onView={() => onSelect(s.id)} /></td>
                   </tr>
@@ -155,14 +209,14 @@ export default function SalesSection({ query, onNew, onSelect, can }: { query: s
         </div>
       )}
 
-      {showPrint && <SalesPrintView sales={filteredSales} filterLabel={filterLabel} onClose={() => setShowPrint(false)} />}
+      {showPrint && <SalesPrintView rows={withDayTotals(chronological)} filterLabel={filterLabel} onClose={() => setShowPrint(false)} />}
     </div>
   );
 }
 
-function SalesPrintView({ sales, filterLabel, onClose }: { sales: SaleRow[]; filterLabel: string; onClose: () => void }) {
-  const grandTotal = sales.reduce((sum, s) => sum + s.total_minor, 0);
-  const grandQuantity = sales.reduce((sum, s) => sum + totalQuantity(s.sale_items), 0);
+function SalesPrintView({ rows, filterLabel, onClose }: { rows: { sale: SaleRow; dayTotalMinor: number | null }[]; filterLabel: string; onClose: () => void }) {
+  const grandTotal = rows.reduce((sum, { sale }) => sum + sale.total_minor, 0);
+  const grandQuantity = rows.reduce((sum, { sale }) => sum + totalQuantity(sale.sale_items), 0);
   return (
     <div className="print-overlay">
       <div className="print-toolbar no-print">
@@ -172,45 +226,66 @@ function SalesPrintView({ sales, filterLabel, onClose }: { sales: SaleRow[]; fil
           <button className="close-button" onClick={onClose}><X size={16} /></button>
         </div>
       </div>
-      <div id="print-area" className="print-sheet">
+      <div id="print-area" className="print-sheet print-sheet-wide">
         <div className="print-header">
-          <div><h1>Oakland Motor Care Ltd.</h1><p className="muted">Sales Report</p><p className="muted">{filterLabel}</p></div>
+          <div><h1>Oakland Motor Care Ltd.</h1><p className="muted">Spares Sales Day Book</p><p className="muted">{filterLabel}</p></div>
         </div>
-        <table className="print-table">
+        <table className="print-table" style={{ fontSize: 10 }}>
           <thead>
             <tr>
               <th>Date</th>
-              <th>Sales ID</th>
-              <th>Work Order No.</th>
-              <th>Customer</th>
-              <th>Product</th>
-              <th>Qty</th>
-              <th>Total</th>
-              <th>M-Pesa Code</th>
-              <th>Status</th>
+              <th>Chg. days</th>
+              <th>Customer Name</th>
+              <th>Vehicle</th>
+              <th>Vehicle model</th>
+              <th>Part/spare No</th>
+              <th>Description &amp; part make</th>
+              <th>Qty sold</th>
+              <th>Price</th>
+              <th>Spares Total</th>
+              <th>Labour/Service</th>
+              <th>TOTAL</th>
+              <th>Day Total</th>
+              <th>Cash/M-Pesa/Banked</th>
+              <th>Debt</th>
+              <th>Jobcard No</th>
+              <th>Stock at shelves</th>
+              <th>System stock</th>
+              <th>Remarks</th>
             </tr>
           </thead>
           <tbody>
-            {sales.map((s) => (
+            {rows.map(({ sale: s, dayTotalMinor }) => (
               <tr key={s.id}>
-                <td>{formatDateTime(s.sale_date)}</td>
-                <td>{s.sale_number}</td>
-                <td>{s.job_cards?.job_number ?? '—'}</td>
-                <td>{CUSTOMER_TYPE_LABELS[s.customer_type] ?? s.customer_type.replaceAll('_', ' ')}</td>
-                <td>{s.sale_items.map((it) => it.part_name).join(', ') || '—'}</td>
+                <td>{localDateStr(new Date(s.sale_date))}</td>
+                <td>{s.change_in_days || ''}</td>
+                <td>{s.customer_name ?? '—'}</td>
+                <td>{s.vehicle_reg ?? '—'}</td>
+                <td>{s.vehicle_model ?? '—'}</td>
+                <td>{joinField(s.sale_items, (i) => i.part_sku)}</td>
+                <td>{joinField(s.sale_items, (i) => i.part_name)}</td>
                 <td>{totalQuantity(s.sale_items)}</td>
+                <td>{joinField(s.sale_items, (i) => formatKes(i.unit_price_minor))}</td>
+                <td>{formatKes(s.subtotal_minor)}</td>
+                <td>{formatKes(s.labour_minor)}</td>
                 <td>{formatKes(s.total_minor)}</td>
-                <td>{s.payment_reference ?? '—'}</td>
-                <td>{s.status.replaceAll('_', ' ')}</td>
+                <td>{dayTotalMinor !== null ? formatKes(dayTotalMinor) : ''}</td>
+                <td>{paymentSummary(s)}</td>
+                <td>{formatKes(s.balance_minor)}</td>
+                <td>{s.job_cards?.job_number ?? '—'}</td>
+                <td>{joinField(s.sale_items, (i) => i.shelf_count_at_sale)}</td>
+                <td>{joinField(s.sale_items, (i) => i.system_stock_after)}</td>
+                <td>{s.notes ?? ''}</td>
               </tr>
             ))}
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={4}><strong>Total ({sales.length} sale{sales.length === 1 ? '' : 's'})</strong></td>
+              <td colSpan={7}><strong>Total ({rows.length} sale{rows.length === 1 ? '' : 's'})</strong></td>
               <td><strong>{grandQuantity}</strong></td>
-              <td><strong>{formatKes(grandTotal)}</strong></td>
               <td colSpan={2} />
+              <td><strong>{formatKes(grandTotal)}</strong></td>
+              <td colSpan={7} />
             </tr>
           </tfoot>
         </table>

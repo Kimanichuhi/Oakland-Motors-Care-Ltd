@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase';
 import type { Sale, SaleItem } from '@/lib/types';
 import { formatKes, formatDateTime } from '@/lib/formatting';
 import { statusStyles } from '@/lib/constants';
-import { ShoppingCart, ChevronRight, User, Phone, CreditCard, CircleDollarSign, Ban } from 'lucide-react';
+import { ShoppingCart, ChevronRight, User, CarFront, CreditCard, CircleDollarSign, Calendar, FileText, Ban } from 'lucide-react';
 
 type SaleWithItems = Sale & { sale_items: SaleItem[]; job_cards: { job_number: string } | null };
 
@@ -52,6 +52,8 @@ export default function SaleDetail({ id, onBack, onNotice, can }: { id: string; 
         <div className="info-card"><CreditCard size={16} /> <div><span>Payment</span><strong>{sale.payment_method.replaceAll('_', ' ')} · {sale.payment_status}</strong>{sale.payment_reference && <span>{sale.payment_reference}{sale.payment_reference_at ? ` · ${formatDateTime(sale.payment_reference_at)}` : ''}</span>}</div></div>
         <div className="info-card"><CircleDollarSign size={16} /> <div><span>Salesperson</span><strong>{sale.salesperson_name ?? '—'}</strong></div></div>
         {sale.technician_name && <div className="info-card"><User size={16} /> <div><span>Technician (buyer)</span><strong>{sale.technician_name}</strong></div></div>}
+        {(sale.vehicle_reg || sale.vehicle_model) && <div className="info-card"><CarFront size={16} /> <div><span>Vehicle</span><strong>{[sale.vehicle_reg, sale.vehicle_model].filter(Boolean).join(' · ')}</strong></div></div>}
+        {sale.change_in_days > 0 && <div className="info-card"><Calendar size={16} /> <div><span>Change in days</span><strong>{sale.change_in_days}</strong></div></div>}
         <div className="info-card"><CircleDollarSign size={16} /> <div><span>Balance due</span><strong>{formatKes(sale.balance_minor)}</strong></div></div>
       </div>
 
@@ -60,7 +62,7 @@ export default function SaleDetail({ id, onBack, onNotice, can }: { id: string; 
         {sale.sale_items.length === 0 ? <div className="empty"><strong>No items</strong></div> : <div className="data-table">
           {sale.sale_items.map((it) => <div key={it.id} className="table-row">
             <div className="job-icon"><ShoppingCart size={16} /></div>
-            <div><strong>{it.part_name}</strong><span>{it.part_sku}{it.returned_quantity > 0 ? ` · ${it.returned_quantity} returned` : ''}</span></div>
+            <div><strong>{it.part_name}</strong><span>{it.part_sku}{it.returned_quantity > 0 ? ` · ${it.returned_quantity} returned` : ''}{it.shelf_count_at_sale !== null ? ` · Shelf count: ${it.shelf_count_at_sale}` : ''}{it.system_stock_after !== null ? ` · System stock after: ${it.system_stock_after}` : ''}</span></div>
             <span className="table-muted">{it.quantity} × {formatKes(it.unit_price_minor)}</span>
             <span className="table-muted">{formatKes(it.line_total_minor)}</span>
           </div>)}
@@ -69,13 +71,19 @@ export default function SaleDetail({ id, onBack, onNotice, can }: { id: string; 
 
       <section className="panel" style={{ marginTop: 20 }}>
         <div className="panel-heading"><div><p className="eyebrow">Summary</p><h3>Totals</h3></div></div>
-        <div className="status-row"><strong>Subtotal</strong><span>{formatKes(sale.subtotal_minor)}</span></div>
+        <div className="status-row"><strong>Spares subtotal</strong><span>{formatKes(sale.subtotal_minor)}</span></div>
+        <div className="status-row"><strong>Labour/Service</strong><span>{formatKes(sale.labour_minor)}</span></div>
         <div className="status-row"><strong>Discount</strong><span>-{formatKes(sale.discount_minor)}</span></div>
         <div className="status-row"><strong>Total</strong><span>{formatKes(sale.total_minor)}</span></div>
         <div className="status-row"><strong>Amount paid</strong><span>{formatKes(sale.amount_paid_minor)}</span></div>
         <div className="status-row"><strong>Balance</strong><span>{formatKes(sale.balance_minor)}</span></div>
         {sale.status === 'VOIDED' && <div className="status-row"><strong>Void reason</strong><span>{sale.void_reason ?? '—'}</span></div>}
       </section>
+
+      {sale.notes && <section className="panel" style={{ marginTop: 20 }}>
+        <div className="panel-heading"><div><p className="eyebrow"><FileText size={12} style={{ verticalAlign: -1 }} /> Notes</p><h3>Remarks</h3></div></div>
+        <p className="muted" style={{ margin: 0 }}>{sale.notes}</p>
+      </section>}
 
       <div className="action-buttons" style={{ marginTop: 16 }}>
         <button className="button secondary" onClick={onBack}>Back</button>
