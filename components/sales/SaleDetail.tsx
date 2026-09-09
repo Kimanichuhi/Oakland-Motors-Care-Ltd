@@ -51,6 +51,7 @@ export default function SaleDetail({ id, onBack, onNotice, can }: { id: string; 
         <div className="info-card"><User size={16} /> <div><span>Customer type</span><strong>{sale.customer_type.replaceAll('_', ' ')}</strong></div></div>
         <div className="info-card"><CreditCard size={16} /> <div><span>Payment</span><strong>{sale.payment_method.replaceAll('_', ' ')} · {sale.payment_status}</strong>{sale.payment_reference && <span>{sale.payment_reference}{sale.payment_reference_at ? ` · ${formatDateTime(sale.payment_reference_at)}` : ''}</span>}</div></div>
         <div className="info-card"><CircleDollarSign size={16} /> <div><span>Salesperson</span><strong>{sale.salesperson_name ?? '—'}</strong></div></div>
+        {sale.technician_name && <div className="info-card"><User size={16} /> <div><span>Technician (buyer)</span><strong>{sale.technician_name}</strong></div></div>}
         <div className="info-card"><CircleDollarSign size={16} /> <div><span>Balance due</span><strong>{formatKes(sale.balance_minor)}</strong></div></div>
       </div>
 

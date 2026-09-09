@@ -312,6 +312,8 @@ export type Sale = {
   customer_type: 'WALK_IN' | 'VEHICLE_OWNER' | 'BUSINESS' | 'GARAGE_WORKSHOP' | 'OTHER';
   salesperson_id: string | null;
   salesperson_name: string | null;
+  technician_id: string | null;
+  technician_name: string | null;
   payment_method: 'CASH' | 'MPESA' | 'BANK' | 'CARD' | 'CREDIT' | 'JOB_CARD' | 'OTHER';
   payment_status: 'PAID' | 'PARTIAL' | 'PENDING';
   status: 'COMPLETED' | 'PARTIALLY_RETURNED' | 'RETURNED' | 'VOIDED';

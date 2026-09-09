@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import type { Part, Sale } from '@/lib/types';
+import type { Part, Sale, Employee } from '@/lib/types';
 import { formatKes, displayToMinor } from '@/lib/formatting';
 import { SALES_PAYMENT_METHODS, SALES_PAYMENT_STATUSES, CUSTOMER_SALE_TYPES } from '@/lib/constants';
 import { Search, Plus, X, AlertTriangle, ShoppingCart } from 'lucide-react';
@@ -17,6 +17,9 @@ export default function SaleForm({ onClose, onSaved, can }: { onClose: () => voi
   const canOverridePrice = can('sales.price.override');
 
   const [customerType, setCustomerType] = useState<(typeof CUSTOMER_SALE_TYPES)[number]>('WALK_IN');
+  const [technicianId, setTechnicianId] = useState('');
+  const [technicians, setTechnicians] = useState<Employee[]>([]);
+  const isGarageWorkshop = customerType === 'GARAGE_WORKSHOP';
   const [saleDate, setSaleDate] = useState(nowForInput());
   const [paymentMethod, setPaymentMethod] = useState<(typeof SALES_PAYMENT_METHODS)[number]>('CASH');
   const [paymentStatus, setPaymentStatus] = useState<(typeof SALES_PAYMENT_STATUSES)[number]>('PAID');
@@ -38,6 +41,10 @@ export default function SaleForm({ onClose, onSaved, can }: { onClose: () => voi
       setParts((data ?? []) as Part[]);
       setPartsLoading(false);
     });
+  }, []);
+
+  useEffect(() => {
+    supabase.from('employees').select('*').eq('active', true).eq('role', 'TECHNICIAN').order('full_name').then(({ data }) => setTechnicians((data ?? []) as Employee[]));
   }, []);
 
   const q = query.trim().toLowerCase();
@@ -88,6 +95,7 @@ export default function SaleForm({ onClose, onSaved, can }: { onClose: () => voi
     if (paymentStatus === 'PARTIAL' && amountPaidMinor <= 0) { setFormError('Enter an amount paid for a partial payment.'); return; }
     if (isMpesa && !mpesaCode.trim()) { setFormError('Enter the M-Pesa transaction code.'); return; }
     if (isMpesa && !mpesaSentAt) { setFormError('Enter the time the M-Pesa payment was sent.'); return; }
+    if (isGarageWorkshop && !technicianId) { setFormError('Select the technician who is making this purchase.'); return; }
 
     setBusy(true);
     try {
@@ -103,6 +111,7 @@ export default function SaleForm({ onClose, onSaved, can }: { onClose: () => voi
         p_items: items.map((i) => ({ part_id: i.partId, quantity: i.quantity, unit_price_minor: i.unitPriceMinor })),
         p_payment_reference: isMpesa ? mpesaCode.trim() : null,
         p_payment_reference_at: isMpesa ? new Date(mpesaSentAt).toISOString() : null,
+        p_technician_id: technicianId || null,
       };
       const { data, error } = await supabase.rpc('complete_sale', payload);
       if (error) throw error;
@@ -123,6 +132,13 @@ export default function SaleForm({ onClose, onSaved, can }: { onClose: () => voi
             <label>Customer type<select value={customerType} onChange={(e) => setCustomerType(e.target.value as typeof customerType)}>{CUSTOMER_SALE_TYPES.map((t) => <option key={t} value={t}>{t.replaceAll('_', ' ')}</option>)}</select></label>
             <label>Sale date<input type="datetime-local" value={saleDate} onChange={(e) => setSaleDate(e.target.value)} required /></label>
           </div>
+
+          {isGarageWorkshop && <label>Technician who is buying
+            <select value={technicianId} onChange={(e) => setTechnicianId(e.target.value)} required>
+              <option value="">Select technician...</option>
+              {technicians.map((t) => <option key={t.id} value={t.id}>{t.full_name}</option>)}
+            </select>
+          </label>}
 
           <label>Add item<div className="combobox">
             <input
