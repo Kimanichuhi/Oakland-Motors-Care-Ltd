@@ -476,7 +476,7 @@ function SectionRouter(props: SectionProps) {
     case 'scraptypes': return <ScrapTypesPage can={p.can} onNotice={p.onNotice} />;
     case 'debtsoverview': return <DebtsOverviewPage onNavigateToRegister={() => p.setSection('debtregister')} onNavigateToReports={() => p.setSection('debtreports')} />;
     case 'debtregister': return <DebtRegisterPage can={p.can} onNotice={p.onNotice} />;
-    case 'debtreports': return <DebtReportsPage />;
+    case 'debtreports': return <DebtReportsPage onSelectJob={(id) => { p.setSelectedJobId(id); p.setSection('jobcards'); }} />;
     case 'vehicleregister': return <VehicleRegisterSection can={p.can} onNotice={p.onNotice} />;
     case 'payments': return <PaymentsSection onNotice={p.onNotice} />;
     case 'receipts': return <ReceiptsSection onNotice={p.onNotice} can={p.can} />;
