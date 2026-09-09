@@ -12,7 +12,7 @@ import {
   ArrowUpRight, Bell, CarFront, CheckCircle2, CircleDollarSign, ClipboardList, Gauge,
   LayoutDashboard, LogOut, Menu, Package, Plus, Search, Settings, ShieldCheck, Sparkles, Users,
   Wrench, X, FileText, Truck, ShoppingCart, Receipt, ScrollText, UserCog, AlertTriangle,
-  TrendingUp, Download, Eye, Edit, Archive, Trash2, Phone, Mail, MapPin, Filter, ChevronRight,
+  TrendingUp, Download, Eye, EyeOff, Edit, Archive, Trash2, Phone, Mail, MapPin, Filter, ChevronRight,
   Briefcase, Boxes, Store, Banknote, Smartphone, FileCheck, Clock, Activity, Calendar, Printer, Recycle, DoorOpen, Ban, Circle, Scale,
 } from 'lucide-react';
 
@@ -539,7 +539,7 @@ function AuthScreen({ error, setError }: { error: string; setError: (v: string) 
     </div></div></div>;
   }
 
-  return <div className="auth-layout"><div className="auth-panel"><div className="auth-card"><img src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" /><h2>Welcome back</h2><p className="muted">Sign in to continue.</p><form onSubmit={submit}><label>Work email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@oaklandmotorcare.co.ke" required /></label><label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" minLength={6} required /></label>{error && <div className="form-error">{error}</div>}<button className="button primary wide" disabled={busy}>{busy ? 'Please wait...' : 'Sign in'} <ArrowUpRight size={17} /></button><button className="switch-auth" type="button" onClick={() => { setMode('forgot'); setError(''); }}>Forgot password?</button></form><PoweredByFooter /></div></div></div>;
+  return <div className="auth-layout"><div className="auth-panel"><div className="auth-card"><img src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" /><h2>Welcome back</h2><p className="muted">Sign in to continue.</p><form onSubmit={submit}><label>Work email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@oaklandmotorcare.co.ke" required /></label><label>Password<PasswordInput value={password} onChange={setPassword} placeholder="Enter your password" minLength={6} required autoComplete="current-password" /></label>{error && <div className="form-error">{error}</div>}<button className="button primary wide" disabled={busy}>{busy ? 'Please wait...' : 'Sign in'} <ArrowUpRight size={17} /></button><button className="switch-auth" type="button" onClick={() => { setMode('forgot'); setError(''); }}>Forgot password?</button></form><PoweredByFooter /></div></div></div>;
 }
 
 function ResetPasswordScreen({ onDone }: { onDone: () => void }) {
@@ -569,8 +569,8 @@ function ResetPasswordScreen({ onDone }: { onDone: () => void }) {
     <h2>Set a new password</h2>
     <p className="muted">Choose a new password for your account.</p>
     <form onSubmit={submit}>
-      <label>New password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" minLength={6} required /></label>
-      <label>Confirm password<input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Re-enter your new password" minLength={6} required /></label>
+      <label>New password<PasswordInput value={password} onChange={setPassword} placeholder="At least 6 characters" minLength={6} required autoComplete="new-password" /></label>
+      <label>Confirm password<PasswordInput value={confirmPassword} onChange={setConfirmPassword} placeholder="Re-enter your new password" minLength={6} required autoComplete="new-password" /></label>
       {error && <div className="form-error">{error}</div>}
       <button className="button primary wide" disabled={busy}>{busy ? 'Updating...' : 'Update password'} <ArrowUpRight size={17} /></button>
     </form>
@@ -3030,8 +3030,8 @@ function CreateAccountForm({ roles, onClose, onSaved }: { roles: Role[]; onClose
     <label>Phone <span className="optional">Optional</span><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0712 345 678" /></label>
     <label>Role<select value={roleId} onChange={(e) => setRoleId(e.target.value)} required><option value="">Select role...</option>{roles.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select></label>
     <div className="form-row">
-      <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" minLength={6} required /></label>
-      <label>Confirm password<input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Re-enter the password" minLength={6} required /></label>
+      <label>Password<PasswordInput value={password} onChange={setPassword} placeholder="At least 6 characters" minLength={6} required autoComplete="new-password" /></label>
+      <label>Confirm password<PasswordInput value={confirmPassword} onChange={setConfirmPassword} placeholder="Re-enter the password" minLength={6} required autoComplete="new-password" /></label>
     </div>
     {error && <div className="form-error">{error}</div>}
     <button className="button primary wide" disabled={busy}>{busy ? 'Creating account...' : 'Create account'} <ArrowUpRight size={16} /></button>
@@ -3066,6 +3066,13 @@ function InviteEmployeeForm({ roles, onClose, onSaved }: { roles: Role[]; onClos
 // === SHARED COMPONENTS ===
 function SectionPanel({ eyebrow, title, onNew, newLabel, extra, children }: { eyebrow: string; title: string; onNew?: () => void; newLabel?: string; extra?: React.ReactNode; children: React.ReactNode }) {
   return <section className="panel table-panel"><div className="panel-heading"><div><p className="eyebrow">{eyebrow}</p><h3>{title}</h3></div><div className="action-buttons">{extra}{onNew && <button className="button primary small" onClick={onNew}><Plus size={16} /> {newLabel}</button>}</div></div>{children}</section>;
+}
+function PasswordInput({ value, onChange, placeholder, minLength, required, autoComplete }: { value: string; onChange: (v: string) => void; placeholder?: string; minLength?: number; required?: boolean; autoComplete?: string }) {
+  const [visible, setVisible] = useState(false);
+  return <div className="password-field">
+    <input type={visible ? 'text' : 'password'} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} minLength={minLength} required={required} autoComplete={autoComplete} />
+    <button type="button" className="password-toggle" tabIndex={-1} onClick={() => setVisible((v) => !v)} aria-label={visible ? 'Hide password' : 'Show password'}>{visible ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+  </div>;
 }
 function PoweredByFooter({ className }: { className?: string }) {
   return <a className={`powered-by ${className ?? ''}`} href="https://qeemlabs.co.ke" target="_blank" rel="noopener noreferrer">Created and Powered by Qeem Labs Ltd</a>;
