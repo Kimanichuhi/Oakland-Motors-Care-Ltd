@@ -26,6 +26,9 @@ import ScrapReconciliationPage from '@/components/scrap/ScrapReconciliationPage'
 import ScrapFinancesPage from '@/components/scrap/ScrapFinancesPage';
 import ScrapReportsPage from '@/components/scrap/ScrapReportsPage';
 import ScrapTypesPage from '@/components/scrap/ScrapTypesPage';
+import DebtsOverviewPage from '@/components/debts/DebtsOverviewPage';
+import DebtRegisterPage from '@/components/debts/DebtRegisterPage';
+import DebtReportsPage from '@/components/debts/DebtReportsPage';
 import VehicleRegisterSection from '@/components/vehicle-register/VehicleRegisterSection';
 
 type SectionId =
@@ -33,6 +36,7 @@ type SectionId =
   | 'sales' | 'parts' | 'stockmovements' | 'lowstock' | 'suppliers' | 'procurement'
   | 'quotations' | 'invoices' | 'payments' | 'receipts'
   | 'scrapdashboard' | 'scraprecords' | 'scrapstock' | 'scrapreconciliation' | 'scrapfinances' | 'scrapreports' | 'scraptypes'
+  | 'debtsoverview' | 'debtregister' | 'debtreports'
   | 'reports' | 'notifications' | 'audit' | 'settings' | 'users';
 
 const NAV_GROUPS: { label: string; items: { id: SectionId; label: string; icon: React.ReactNode; perm: string }[] }[] = [
@@ -61,6 +65,11 @@ const NAV_GROUPS: { label: string; items: { id: SectionId; label: string; icon: 
     { id: 'scrapfinances', label: 'Finances', icon: <CircleDollarSign size={18} />, perm: 'scrap.view' },
     { id: 'scrapreports', label: 'Reports', icon: <Gauge size={18} />, perm: 'scrap.view' },
     { id: 'scraptypes', label: 'Scrap Types & Rates', icon: <Recycle size={18} />, perm: 'scrap.manage' },
+  ] },
+  { label: 'Debts', items: [
+    { id: 'debtsoverview', label: 'Overview', icon: <AlertTriangle size={18} />, perm: 'debt.view' },
+    { id: 'debtregister', label: 'Debt Register', icon: <ClipboardList size={18} />, perm: 'debt.view' },
+    { id: 'debtreports', label: 'Reports', icon: <Gauge size={18} />, perm: 'debt.view' },
   ] },
   { label: 'Finance', items: [
     { id: 'quotations', label: 'Quotations', icon: <FileText size={18} />, perm: 'quotation.view' },
@@ -464,6 +473,9 @@ function SectionRouter(props: SectionProps) {
     case 'scrapfinances': return <ScrapFinancesPage />;
     case 'scrapreports': return <ScrapReportsPage can={p.can} />;
     case 'scraptypes': return <ScrapTypesPage can={p.can} onNotice={p.onNotice} />;
+    case 'debtsoverview': return <DebtsOverviewPage onNavigateToRegister={() => p.setSection('debtregister')} onNavigateToReports={() => p.setSection('debtreports')} />;
+    case 'debtregister': return <DebtRegisterPage can={p.can} onNotice={p.onNotice} />;
+    case 'debtreports': return <DebtReportsPage />;
     case 'vehicleregister': return <VehicleRegisterSection can={p.can} onNotice={p.onNotice} />;
     case 'payments': return <PaymentsSection onNotice={p.onNotice} />;
     case 'receipts': return <ReceiptsSection onNotice={p.onNotice} can={p.can} />;

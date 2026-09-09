@@ -355,6 +355,26 @@ export type Employee = {
   active: boolean;
 };
 
+export type DebtRecord = {
+  id: string;
+  debt_type: 'CUSTOMER' | 'STAFF';
+  responsible_employee_id: string | null;
+  responsible_name: string;
+  customer_id: string | null;
+  job_card_id: string | null;
+  part_id: string | null;
+  item_description: string;
+  amount_minor: number;
+  amount_recovered_minor: number;
+  status: 'OUTSTANDING' | 'PARTIALLY_RECOVERED' | 'RECOVERED' | 'WRITTEN_OFF';
+  incurred_date: string;
+  notes: string | null;
+  write_off_reason: string | null;
+  created_at: string;
+  updated_at: string;
+  recovered_at: string | null;
+};
+
 export type Notification = {
   id: string;
   user_id: string;
