@@ -5,6 +5,7 @@ import { toPng } from 'html-to-image';
 import { supabase } from '@/lib/supabase';
 import { formatKes, formatDate, formatDateTime, computeLineTotal, downloadCSV, formatKg, localDateStr, localDayStart, localDayEnd } from '@/lib/formatting';
 import { getTaxRate, clearTaxRateCache } from '@/lib/settings';
+import { purgeRecord, purgeVehicleAndHistory } from '@/lib/purge';
 import { statusStyles, JOB_TRANSITIONS, PAYMENT_METHODS, SALES_PAYMENT_METHODS, SALES_PAYMENT_STATUSES, CUSTOMER_SALE_TYPES, PART_CATEGORIES, JOB_TYPE_META, MOVEMENT_TYPES } from '@/lib/constants';
 import { loadUserPermissions, hasPermission, clearPermissionCache, type UserPermission } from '@/lib/permissions';
 import type { Customer, Vehicle, Service, Part, Supplier, JobCard, JobCardLabour, JobCardPart, JobCardStatusHistory, JobCardInspectionItem, JobCardWorkItem, JobCardDiagnosis, JobCardQualityCheck, JobCardSignoff, Invoice, InvoiceItem, Payment, GeneralReceipt, GeneralReceiptItem, Quotation, QuotationItem, PurchaseOrder, PurchaseOrderItem, StockMovement, Sale, SaleItem, Employee, Notification, AuditLog, BusinessSettings, Role, Permission, Profile } from '@/lib/types';
@@ -445,12 +446,12 @@ function SectionRouter(props: SectionProps) {
   const p = props;
   switch (p.section) {
     case 'dashboard': return <DashboardSection onNewJob={() => p.setShowJobForm(true)} onNewCustomer={() => p.setShowCustomerForm(true)} onNewSale={() => p.setShowSaleForm(true)} onReceiveStock={() => p.setShowStockReceiveForm(true)} onNavigate={p.setSection} onSelectJob={(id) => { p.setSelectedJobId(id); p.setSection('jobcards'); }} onSelectInvoice={(id) => { p.setSelectedInvoiceId(id); p.setSection('invoices'); }} can={p.can} userPerms={p.userPerms} />;
-    case 'customers': return p.selectedCustomerId ? <CustomerDetail id={p.selectedCustomerId} onBack={() => p.setSelectedCustomerId(null)} onNewVehicle={() => p.setShowVehicleForm(true)} onNewJob={() => p.setShowJobForm(true)} can={p.can} /> : <CustomersSection query={p.query} onNew={() => p.setShowCustomerForm(true)} onSelect={(id) => p.setSelectedCustomerId(id)} can={p.can} />;
-    case 'vehicles': return p.selectedVehicleId ? <VehicleDetail id={p.selectedVehicleId} onBack={() => p.setSelectedVehicleId(null)} onNewJob={() => p.setShowJobForm(true)} can={p.can} /> : <VehiclesSection query={p.query} onSelect={(id) => p.setSelectedVehicleId(id)} />;
+    case 'customers': return p.selectedCustomerId ? <CustomerDetail id={p.selectedCustomerId} onBack={() => p.setSelectedCustomerId(null)} onNewVehicle={() => p.setShowVehicleForm(true)} onNewJob={() => p.setShowJobForm(true)} can={p.can} onNotice={p.onNotice} /> : <CustomersSection query={p.query} onNew={() => p.setShowCustomerForm(true)} onSelect={(id) => p.setSelectedCustomerId(id)} can={p.can} />;
+    case 'vehicles': return p.selectedVehicleId ? <VehicleDetail id={p.selectedVehicleId} onBack={() => p.setSelectedVehicleId(null)} onNewJob={() => p.setShowJobForm(true)} can={p.can} onNotice={p.onNotice} /> : <VehiclesSection query={p.query} onSelect={(id) => p.setSelectedVehicleId(id)} />;
     case 'jobcards': return p.selectedJobId ? <JobDetail id={p.selectedJobId} onBack={() => p.setSelectedJobId(null)} can={p.can} onNotice={p.onNotice} /> : <JobsSection query={p.query} onNew={() => p.setShowJobForm(true)} onSelect={(id) => p.setSelectedJobId(id)} onNotice={p.onNotice} can={p.can} />;
     case 'services': return <ServicesSection onNew={() => p.setShowServiceForm(true)} can={p.can} />;
     case 'technicians': return p.selectedTechnicianId ? <TechnicianDetail id={p.selectedTechnicianId} onBack={() => p.setSelectedTechnicianId(null)} /> : <TechniciansSection onNew={() => p.setShowTechnicianForm(true)} onSelect={(id) => p.setSelectedTechnicianId(id)} can={p.can} />;
-    case 'sales': return p.selectedSaleId ? <SaleDetail id={p.selectedSaleId} onBack={() => p.setSelectedSaleId(null)} can={p.can} onNotice={p.onNotice} /> : <SalesSection query={p.query} onNew={() => p.setShowSaleForm(true)} onSelect={(id) => p.setSelectedSaleId(id)} can={p.can} />;
+    case 'sales': return p.selectedSaleId ? <SaleDetail id={p.selectedSaleId} onBack={() => p.setSelectedSaleId(null)} can={p.can} onNotice={p.onNotice} /> : <SalesSection query={p.query} onNew={() => p.setShowSaleForm(true)} onSelect={(id) => p.setSelectedSaleId(id)} can={p.can} onNotice={p.onNotice} />;
     case 'parts': return p.selectedPartId ? <PartDetail id={p.selectedPartId} onBack={() => p.setSelectedPartId(null)} can={p.can} onNotice={p.onNotice}
       onNavigateToSale={(saleId) => { p.setSelectedSaleId(saleId); p.setSection('sales'); }}
       onNavigateToJob={(jobId) => { p.setSelectedJobId(jobId); p.setSection('jobcards'); }}
@@ -463,10 +464,10 @@ function SectionRouter(props: SectionProps) {
       onNavigateToPO={(id) => { p.setSelectedPOId(id); p.setSection('procurement'); }}
     />;
     case 'lowstock': return <LowStockSection onSelect={(id) => { p.setSelectedPartId(id); p.setSection('parts'); }} onNotice={p.onNotice} can={p.can} onNavigateToPO={(id) => { p.setSelectedPOId(id); p.setSection('procurement'); }} />;
-    case 'suppliers': return p.selectedSupplierId ? <SupplierDetail id={p.selectedSupplierId} onBack={() => p.setSelectedSupplierId(null)} onNewPO={() => p.setShowPOForm(true)} can={p.can} /> : <SuppliersSection query={p.query} onNew={() => p.setShowSupplierForm(true)} onSelect={(id) => p.setSelectedSupplierId(id)} can={p.can} />;
+    case 'suppliers': return p.selectedSupplierId ? <SupplierDetail id={p.selectedSupplierId} onBack={() => p.setSelectedSupplierId(null)} onNewPO={() => p.setShowPOForm(true)} can={p.can} onNotice={p.onNotice} /> : <SuppliersSection query={p.query} onNew={() => p.setShowSupplierForm(true)} onSelect={(id) => p.setSelectedSupplierId(id)} can={p.can} />;
     case 'procurement': return p.selectedPOId ? <PODetail id={p.selectedPOId} onBack={() => p.setSelectedPOId(null)} can={p.can} onNotice={p.onNotice} /> : <ProcurementSection onNew={() => p.setShowPOForm(true)} onSelect={(id) => p.setSelectedPOId(id)} can={p.can} />;
     case 'quotations': return p.selectedQuotationId ? <QuotationDetail id={p.selectedQuotationId} onBack={() => p.setSelectedQuotationId(null)} can={p.can} onNotice={p.onNotice} /> : <QuotationsSection onNew={() => p.setShowQuotationForm(true)} onSelect={(id) => p.setSelectedQuotationId(id)} can={p.can} />;
-    case 'invoices': return p.selectedInvoiceId ? <InvoiceDetail id={p.selectedInvoiceId} onBack={() => p.setSelectedInvoiceId(null)} onPayment={() => p.setShowPaymentForm(true)} can={p.can} /> : <InvoicesSection query={p.query} onNew={() => p.setShowInvoiceForm(true)} onSelect={(id) => p.setSelectedInvoiceId(id)} can={p.can} />;
+    case 'invoices': return p.selectedInvoiceId ? <InvoiceDetail id={p.selectedInvoiceId} onBack={() => p.setSelectedInvoiceId(null)} onPayment={() => p.setShowPaymentForm(true)} can={p.can} onNotice={p.onNotice} /> : <InvoicesSection query={p.query} onNew={() => p.setShowInvoiceForm(true)} onSelect={(id) => p.setSelectedInvoiceId(id)} can={p.can} />;
     case 'scrapdashboard': return <ScrapDashboardPage can={p.can} onNotice={p.onNotice} onNavigateToStock={() => p.setSection('scrapstock')} />;
     case 'scraprecords': return <ScrapRecordsPage can={p.can} onNotice={p.onNotice} />;
     case 'scrapstock': return <ScrapStockPage can={p.can} onNotice={p.onNotice} />;
@@ -483,7 +484,7 @@ function SectionRouter(props: SectionProps) {
     case 'reports': return <ReportsSection />;
     case 'notifications': return <NotificationsSection onRefresh={p.onRefresh} can={p.can} onSelectInvoice={(id) => { p.setSelectedInvoiceId(id); p.setSection('invoices'); }} />;
     case 'audit': return <AuditSection />;
-    case 'settings': return <SettingsSection onNotice={p.onNotice} />;
+    case 'settings': return <SettingsSection onNotice={p.onNotice} can={p.can} />;
     case 'users': return <UsersSection onNotice={p.onNotice} />;
     default: return null;
   }
@@ -763,11 +764,20 @@ function CustomersSection({ query, onNew, onSelect, can }: { query: string; onNe
   </SectionPanel>;
 }
 
-function CustomerDetail({ id, onBack, onNewVehicle, onNewJob, can }: { id: string; onBack: () => void; onNewVehicle: () => void; onNewJob: () => void; can: (p: string) => boolean }) {
+function CustomerDetail({ id, onBack, onNewVehicle, onNewJob, can, onNotice }: { id: string; onBack: () => void; onNewVehicle: () => void; onNewJob: () => void; can: (p: string) => boolean; onNotice: (m: string) => void }) {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [jobs, setJobs] = useState<JobCard[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [purging, setPurging] = useState(false);
+  async function purge() {
+    if (!customer || purging) return;
+    setPurging(true);
+    const r = await purgeRecord('customers', customer.id, `customer "${customer.full_name}"`);
+    setPurging(false);
+    if (r.message) onNotice(r.message);
+    if (r.ok) onBack();
+  }
   useEffect(() => {
     (async () => {
       const [c, v, j, i] = await Promise.all([
@@ -798,6 +808,7 @@ function CustomerDetail({ id, onBack, onNewVehicle, onNewJob, can }: { id: strin
       <section className="panel"><div className="panel-heading"><div><p className="eyebrow">Fleet</p><h3>Vehicles ({vehicles.length})</h3></div></div>{vehicles.length === 0 ? <Empty title="No vehicles" text="Add a vehicle for this customer." /> : <div className="data-table">{vehicles.map((v) => <div className="table-row" key={v.id}><div className="job-icon"><CarFront size={17} /></div><div><strong>{v.registration_number}</strong><span>{v.make} {v.model}</span></div><span className="table-muted">{v.mileage.toLocaleString()} KM</span></div>)}</div>}</section>
       <section className="panel"><div className="panel-heading"><div><p className="eyebrow">History</p><h3>Recent jobs ({jobs.length})</h3></div></div>{jobs.length === 0 ? <Empty title="No jobs" text="No work orders for this customer." /> : <div className="data-table">{jobs.slice(0, 5).map((j) => <div className="table-row" key={j.id}><div className="job-icon"><Wrench size={17} /></div><div><strong>{j.job_number}</strong><span>{j.complaint}</span></div><span className={`status ${statusStyles[j.status] ?? ''}`}>{j.status.replaceAll('_', ' ')}</span></div>)}</div>}</section>
     </div>
+    {can('settings.manage') && <div className="action-buttons" style={{ marginTop: 16 }}><button className="button danger" disabled={purging} onClick={() => void purge()}><Trash2 size={15} /> {purging ? 'Deleting...' : 'Delete permanently'}</button></div>}
   </>;
 }
 
@@ -832,12 +843,21 @@ const TIMELINE_DOT_TONES: Record<string, string> = {
   AWAITING_PARTS: 'gold', CANCELLED: 'red', RECEIVED: 'navy', DIAGNOSING: 'navy',
 };
 
-function VehicleDetail({ id, onBack, onNewJob, can }: { id: string; onBack: () => void; onNewJob: () => void; can: (p: string) => boolean }) {
+function VehicleDetail({ id, onBack, onNewJob, can, onNotice }: { id: string; onBack: () => void; onNewJob: () => void; can: (p: string) => boolean; onNotice: (m: string) => void }) {
   const [vehicle, setVehicle] = useState<(Vehicle & { customers: Customer | null }) | null>(null);
   const [jobs, setJobs] = useState<(JobCard & { job_card_labour: JobCardLabour[]; job_card_parts: JobCardPart[]; job_card_diagnosis: JobCardDiagnosis[] })[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [taxRate, setTaxRate] = useState(16);
+  const [purging, setPurging] = useState(false);
   useEffect(() => { void getTaxRate().then(setTaxRate); }, []);
+  async function purge() {
+    if (!vehicle || purging) return;
+    setPurging(true);
+    const r = await purgeRecord('vehicles', vehicle.id, `vehicle "${vehicle.registration_number}"`);
+    setPurging(false);
+    if (r.message) onNotice(r.message);
+    if (r.ok) onBack();
+  }
   useEffect(() => {
     (async () => {
       const [v, j, i] = await Promise.all([
@@ -882,6 +902,7 @@ function VehicleDetail({ id, onBack, onNewJob, can }: { id: string; onBack: () =
         </div>;
       })}</div>}
     </section>
+    {can('settings.manage') && <div className="action-buttons" style={{ marginTop: 16 }}><button className="button danger" disabled={purging} onClick={() => void purge()}><Trash2 size={15} /> {purging ? 'Deleting...' : 'Delete permanently'}</button></div>}
   </>;
 }
 
@@ -1027,7 +1048,17 @@ function JobDetail({ id, onBack, can, onNotice }: { id: string; onBack: () => vo
   const [savingDetails, setSavingDetails] = useState(false);
   const [showPrint, setShowPrint] = useState(false);
   const [taxRate, setTaxRate] = useState(16);
+  const [purging, setPurging] = useState(false);
   useEffect(() => { void getTaxRate().then(setTaxRate); }, []);
+
+  async function purge() {
+    if (!job || purging) return;
+    setPurging(true);
+    const r = await purgeRecord('job_cards', job.id, `work order "${job.job_number}"`);
+    setPurging(false);
+    if (r.message) onNotice(r.message);
+    if (r.ok) onBack();
+  }
 
   useEffect(() => {
     (async () => {
@@ -1209,6 +1240,7 @@ function JobDetail({ id, onBack, can, onNotice }: { id: string; onBack: () => vo
         {can('job.update') && <button className="button primary small" disabled={savingDetails} onClick={() => void saveDetails()}>{savingDetails ? 'Saving…' : 'Save details'}</button>}
         {total > 0 && can('invoice.create') && <button className="button secondary small" onClick={() => void openTab()}>{invoice ? 'Refresh invoice' : 'Open invoice'}</button>}
         {can('job.view') && <button className="button secondary small" onClick={() => setShowPrint(true)}><Printer size={16} /> Print work order</button>}
+        {can('settings.manage') && <button className="button danger small" disabled={purging} onClick={() => void purge()}><Trash2 size={15} /> {purging ? 'Deleting...' : 'Delete permanently'}</button>}
       </div>
     </section>
     {showPrint && <JobCardPrintView job={job} labourTotal={labourTotal} partsTotal={partsTotal} taxRate={taxRate} onClose={() => setShowPrint(false)} onNotice={onNotice} />}
@@ -1741,6 +1773,16 @@ function PartDetail({ id, onBack, can, onNotice, onNavigateToSale, onNavigateToJ
   const [actorNames, setActorNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [showEdit, setShowEdit] = useState(false);
+  const [purging, setPurging] = useState(false);
+
+  async function purge() {
+    if (!part || purging) return;
+    setPurging(true);
+    const r = await purgeRecord('parts', part.id, `part "${part.name}"`);
+    setPurging(false);
+    if (r.message) onNotice(r.message);
+    if (r.ok) onBack();
+  }
 
   const load = useCallback(async () => {
     const [{ data: partData }, { data: movementData }] = await Promise.all([
@@ -1809,6 +1851,7 @@ function PartDetail({ id, onBack, can, onNotice, onNavigateToSale, onNavigateToJ
         </tr>;
       })}</tbody></table></div>}
     </section>
+    {can('settings.manage') && <div className="action-buttons" style={{ marginTop: 16 }}><button className="button danger" disabled={purging} onClick={() => void purge()}><Trash2 size={15} /> {purging ? 'Deleting...' : 'Delete permanently'}</button></div>}
     {showEdit && <PartForm part={part} onClose={() => setShowEdit(false)} onSaved={(m) => { setShowEdit(false); onNotice(m); void load(); }} />}
   </>;
 }
@@ -2096,9 +2139,18 @@ function SuppliersSection({ query, onNew, onSelect, can }: { query: string; onNe
   </SectionPanel>;
 }
 
-function SupplierDetail({ id, onBack, onNewPO, can }: { id: string; onBack: () => void; onNewPO: () => void; can: (p: string) => boolean }) {
+function SupplierDetail({ id, onBack, onNewPO, can, onNotice }: { id: string; onBack: () => void; onNewPO: () => void; can: (p: string) => boolean; onNotice: (m: string) => void }) {
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [pos, setPOs] = useState<PurchaseOrder[]>([]);
+  const [purging, setPurging] = useState(false);
+  async function purge() {
+    if (!supplier || purging) return;
+    setPurging(true);
+    const r = await purgeRecord('suppliers', supplier.id, `supplier "${supplier.name}"`);
+    setPurging(false);
+    if (r.message) onNotice(r.message);
+    if (r.ok) onBack();
+  }
   useEffect(() => {
     (async () => {
       const [s, p] = await Promise.all([
@@ -2120,6 +2172,7 @@ function SupplierDetail({ id, onBack, onNewPO, can }: { id: string; onBack: () =
       <div className="info-card"><ShoppingCart size={16} /> <div><span>Purchase orders</span><strong>{pos.length}</strong></div></div>
     </div>
     <section className="panel" style={{ marginTop: 20 }}><div className="panel-heading"><div><p className="eyebrow">Procurement</p><h3>Purchase orders</h3></div></div>{pos.length === 0 ? <Empty title="No purchase orders" text="Create a PO for this supplier." /> : <div className="data-table">{pos.map((p) => <div className="table-row" key={p.id}><div className="job-icon"><ShoppingCart size={17} /></div><div><strong>{p.po_number}</strong><span>{formatDate(p.order_date)}</span></div><span className="table-muted">{formatKes(p.total_minor)}</span><span className={`status ${statusStyles[p.status] ?? ''}`}>{p.status.replaceAll('_', ' ')}</span></div>)}</div>}</section>
+    {can('settings.manage') && <div className="action-buttons" style={{ marginTop: 16 }}><button className="button danger" disabled={purging} onClick={() => void purge()}><Trash2 size={15} /> {purging ? 'Deleting...' : 'Delete permanently'}</button></div>}
   </>;
 }
 
@@ -2146,9 +2199,19 @@ function PODetail({ id, onBack, can, onNotice }: { id: string; onBack: () => voi
   const [availableParts, setAvailableParts] = useState<Part[]>([]);
   const [pickPartId, setPickPartId] = useState(''); const [pickQty, setPickQty] = useState('1'); const [pickCost, setPickCost] = useState('0');
   const [showPrint, setShowPrint] = useState(false);
+  const [purging, setPurging] = useState(false);
 
   async function reload() { const { data } = await supabase.from('purchase_orders').select('*, suppliers(*), purchase_order_items(*, parts(*))').eq('id', id).maybeSingle(); setPO(data as PODetailData | null); }
   useEffect(() => { void reload(); }, [id]);
+
+  async function purge() {
+    if (!po || purging) return;
+    setPurging(true);
+    const r = await purgeRecord('purchase_orders', po.id, `purchase order "${po.po_number}"`);
+    setPurging(false);
+    if (r.message) onNotice(r.message);
+    if (r.ok) onBack();
+  }
 
   const editable = po?.status === 'DRAFT' && can('settings.manage');
   useEffect(() => { if (editable) supabase.from('parts').select('*').eq('active', true).order('name').limit(500).then(({ data }) => setAvailableParts((data ?? []) as Part[])); }, [editable]);
@@ -2209,6 +2272,7 @@ function PODetail({ id, onBack, can, onNotice }: { id: string; onBack: () => voi
     <div className="action-buttons" style={{ marginBottom: 16 }}>
       <button className="button secondary small" onClick={() => setShowPrint(true)}><Printer size={15} /> Export PDF</button>
       {editable && <button className={`button ${editMode ? 'primary' : 'secondary'} small`} onClick={() => setEditMode((v) => !v)}><Edit size={15} /> {editMode ? 'Done editing' : 'Edit order'}</button>}
+      {can('settings.manage') && <button className="button danger small" disabled={purging} onClick={() => void purge()}><Trash2 size={15} /> {purging ? 'Deleting...' : 'Delete permanently'}</button>}
     </div>
     <div className="detail-info-grid">
       <div className="info-card"><Calendar size={16} /> <div><span>Order date</span><strong>{formatDate(po.order_date)}</strong></div></div>
@@ -2289,8 +2353,18 @@ function QuotationsSection({ onNew, onSelect, can }: { onNew: () => void; onSele
 
 function QuotationDetail({ id, onBack, can, onNotice }: { id: string; onBack: () => void; can: (p: string) => boolean; onNotice: (m: string) => void }) {
   const [quote, setQuote] = useState<(Quotation & { customers: Customer | null; vehicles: Vehicle | null; quotation_items: QuotationItem[] }) | null>(null);
+  const [purging, setPurging] = useState(false);
   useEffect(() => { supabase.from('quotations').select('*, customers(*), vehicles(*), quotation_items(*)').eq('id', id).maybeSingle().then(({ data }) => setQuote(data as (Quotation & { customers: Customer | null; vehicles: Vehicle | null; quotation_items: QuotationItem[] }) | null)); }, [id]);
   if (!quote) return <Loading />;
+
+  async function purge() {
+    if (!quote || purging) return;
+    setPurging(true);
+    const r = await purgeRecord('quotations', quote.id, `quotation "${quote.quote_number}"`);
+    setPurging(false);
+    if (r.message) onNotice(r.message);
+    if (r.ok) onBack();
+  }
 
   async function approve() {
     if (!quote) return;
@@ -2330,6 +2404,7 @@ function QuotationDetail({ id, onBack, can, onNotice }: { id: string; onBack: ()
     {quote.status === 'PENDING_APPROVAL' && can('quotation.approve') && <div className="action-buttons" style={{ marginTop: 16 }}><button className="button primary" onClick={() => void approve()}><CheckCircle2 size={16} /> Approve</button><button className="button secondary" onClick={() => void reject()}><X size={16} /> Reject</button></div>}
     {quote.status === 'APPROVED' && can('invoice.create') && <div className="action-buttons" style={{ marginTop: 16 }}><button className="button primary" onClick={() => void convertToInvoice()}><ArrowUpRight size={16} /> Convert to invoice</button></div>}
     {quote.terms && <section className="panel" style={{ marginTop: 20 }}><div className="panel-heading"><div><p className="eyebrow">Terms</p><h3>Terms & conditions</h3></div></div><p className="muted">{quote.terms}</p></section>}
+    {can('settings.manage') && <div className="action-buttons" style={{ marginTop: 16 }}><button className="button danger" disabled={purging} onClick={() => void purge()}><Trash2 size={15} /> {purging ? 'Deleting...' : 'Delete permanently'}</button></div>}
   </>;
 }
 
@@ -2350,11 +2425,20 @@ function InvoicesSection({ query, onNew, onSelect, can }: { query: string; onNew
   </SectionPanel>;
 }
 
-function InvoiceDetail({ id, onBack, onPayment, can }: { id: string; onBack: () => void; onPayment: () => void; can: (p: string) => boolean }) {
+function InvoiceDetail({ id, onBack, onPayment, can, onNotice }: { id: string; onBack: () => void; onPayment: () => void; can: (p: string) => boolean; onNotice: (m: string) => void }) {
   const [invoice, setInvoice] = useState<(Invoice & { customers: Customer | null; vehicles: Vehicle | null; invoice_items: InvoiceItem[]; payments: Payment[]; job_cards: { job_number: string } | null }) | null>(null);
+  const [purging, setPurging] = useState(false);
   useEffect(() => { supabase.from('invoices').select('*, customers(*), vehicles(*), invoice_items(*), payments(*), job_cards(job_number)').eq('id', id).maybeSingle().then(({ data }) => setInvoice(data as (Invoice & { customers: Customer | null; vehicles: Vehicle | null; invoice_items: InvoiceItem[]; payments: Payment[]; job_cards: { job_number: string } | null }) | null)); }, [id]);
   if (!invoice) return <Loading />;
   const balance = invoice.total_minor - invoice.amount_paid_minor;
+  async function purge() {
+    if (!invoice || purging) return;
+    setPurging(true);
+    const r = await purgeRecord('invoices', invoice.id, `invoice "${invoice.invoice_number}"`);
+    setPurging(false);
+    if (r.message) onNotice(r.message);
+    if (r.ok) onBack();
+  }
   return <>
     <BackBar onBack={onBack} label="Invoices" />
     <div className="detail-header"><div className="detail-avatar invoice"><CircleDollarSign size={24} /></div><div className="flex-1"><h2>{invoice.invoice_number}</h2><p className="muted">{invoice.customers?.full_name ?? 'Customer'} · Work Order {invoice.job_cards?.job_number ?? '—'} · Due {formatDate(invoice.due_date)}</p></div><span className={`status ${statusStyles[invoice.status] ?? ''}`}>{invoice.status.replaceAll('_', ' ')}</span></div>
@@ -2367,6 +2451,7 @@ function InvoiceDetail({ id, onBack, onPayment, can }: { id: string; onBack: () 
       <section className="panel"><div className="panel-heading"><div><p className="eyebrow">Line items</p><h3>Invoice items</h3></div></div>{invoice.invoice_items.length === 0 ? <Empty title="No items" text="This invoice has no items." /> : <div className="data-table">{invoice.invoice_items.map((item) => <div className="table-row" key={item.id}><div><strong>{item.description}</strong><span>{item.item_type} · {item.quantity} × {formatKes(item.unit_price_minor)}</span></div><span className="table-muted">{formatKes(item.line_total_minor)}</span></div>)}</div>}<div className="total-row"><strong>Grand total</strong><span>{formatKes(invoice.total_minor)}</span></div></section>
       <section className="panel"><div className="panel-heading"><div><p className="eyebrow">Reconciliation</p><h3>Payments</h3></div>{balance > 0 && can('payment.create') && <button className="button primary small" onClick={onPayment}><Plus size={15} /> Record payment</button>}</div>{invoice.payments.length === 0 ? <Empty title="No payments" text="Record a payment against this invoice." /> : <div className="data-table">{invoice.payments.map((p) => <div className="table-row" key={p.id}><div className="job-icon"><Banknote size={17} /></div><div><strong>{formatKes(p.amount_minor)}</strong><span>{p.method} · {formatDate(p.paid_at)}</span></div><span className="table-muted">{p.reference ?? '—'}</span></div>)}</div>}</section>
     </div>
+    {can('settings.manage') && <div className="action-buttons" style={{ marginTop: 16 }}><button className="button danger" disabled={purging} onClick={() => void purge()}><Trash2 size={15} /> {purging ? 'Deleting...' : 'Delete permanently'}</button></div>}
   </>;
 }
 
@@ -2913,7 +2998,7 @@ function AuditSection() {
 }
 
 // === SETTINGS ===
-function SettingsSection({ onNotice }: { onNotice: (m: string) => void }) {
+function SettingsSection({ onNotice, can }: { onNotice: (m: string) => void; can: (p: string) => boolean }) {
   const [settings, setSettings] = useState<BusinessSettings | null>(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => { supabase.from('business_settings').select('*').limit(1).single().then(({ data }) => { setSettings(data as BusinessSettings); setLoading(false); }); }, []);
@@ -2947,7 +3032,86 @@ function SettingsSection({ onNotice }: { onNotice: (m: string) => void }) {
     <section className="panel" style={{ marginTop: 20 }}><div className="panel-heading"><div><p className="eyebrow">Document templates</p><h3>Work order terms &amp; conditions</h3></div></div>
       <label>Printed on every work order <span className="optional">Shown on Customer and Workshop copies</span><textarea value={settings.job_card_terms} onChange={(e) => setSettings({ ...settings, job_card_terms: e.target.value })} style={{ minHeight: 140 }} /></label>
     </section>
+    {can('settings.manage') && <VehiclePurgePanel onNotice={onNotice} />}
   </>;
+}
+
+function VehiclePurgePanel({ onNotice }: { onNotice: (m: string) => void }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<(Vehicle & { customers: { full_name: string } | null })[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [selected, setSelected] = useState<(Vehicle & { customers: { full_name: string } | null }) | null>(null);
+  const [counts, setCounts] = useState<{ jobCards: number; invoices: number; quotations: number } | null>(null);
+  const [countsLoading, setCountsLoading] = useState(false);
+  const [purging, setPurging] = useState(false);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) { setResults([]); return; }
+    setSearching(true);
+    const timer = setTimeout(() => {
+      supabase.from('vehicles').select('*, customers(full_name)').is('deleted_at', null)
+        .or(`registration_number.ilike.%${q}%,make.ilike.%${q}%,model.ilike.%${q}%,vin.ilike.%${q}%`)
+        .order('registration_number').limit(15)
+        .then(({ data }) => { setResults((data ?? []) as (Vehicle & { customers: { full_name: string } | null })[]); setSearching(false); });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  async function selectVehicle(v: Vehicle & { customers: { full_name: string } | null }) {
+    setSelected(v); setCounts(null); setCountsLoading(true);
+    const [jc, inv, quo] = await Promise.all([
+      supabase.from('job_cards').select('id', { count: 'exact', head: true }).eq('vehicle_id', v.id).is('deleted_at', null),
+      supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('vehicle_id', v.id),
+      supabase.from('quotations').select('id', { count: 'exact', head: true }).eq('vehicle_id', v.id),
+    ]);
+    setCounts({ jobCards: jc.count ?? 0, invoices: inv.count ?? 0, quotations: quo.count ?? 0 });
+    setCountsLoading(false);
+  }
+
+  async function purge() {
+    if (!selected || !counts || purging) return;
+    setPurging(true);
+    const historyNote = (counts.jobCards + counts.invoices + counts.quotations) === 0
+      ? 'its (empty) history'
+      : `${counts.jobCards} work order${counts.jobCards === 1 ? '' : 's'}, ${counts.invoices} invoice${counts.invoices === 1 ? '' : 's'}, and ${counts.quotations} quotation${counts.quotations === 1 ? '' : 's'} linked to it (plus any sales, payments, and debt records tied to those work orders)`;
+    const r = await purgeVehicleAndHistory(selected.id, `vehicle "${selected.registration_number}"`, historyNote);
+    setPurging(false);
+    if (r.message) onNotice(r.message);
+    if (r.ok) { setSelected(null); setCounts(null); setQuery(''); setResults([]); }
+  }
+
+  return <section className="panel" style={{ marginTop: 20, borderColor: '#e3a8a1' }}>
+    <div className="panel-heading"><div><p className="eyebrow">Danger zone</p><h3>Find &amp; purge a vehicle</h3></div></div>
+    <p className="muted" style={{ marginTop: -6 }}>Search for a vehicle to permanently delete it and everything recorded against it — work orders, invoices, quotations, sales, payments, and debt records. This bypasses the usual safeguard that blocks deleting a vehicle with history, so use it only for cleaning up mistaken or duplicate entries.</p>
+    <div style={{ position: 'relative', marginTop: 10, maxWidth: 420 }}>
+      <Search size={16} style={{ position: 'absolute', left: 12, top: 12, color: '#94a3b8' }} />
+      <input value={query} onChange={(e) => { setQuery(e.target.value); setSelected(null); setCounts(null); }} placeholder="Search by reg. number, make, model, or VIN..." style={{ width: '100%', padding: '10px 12px 10px 36px', border: '1px solid #dfe5ea', borderRadius: 8, fontSize: 13 }} />
+    </div>
+    {searching && <p className="muted" style={{ marginTop: 8 }}>Searching...</p>}
+    {!selected && results.length > 0 && <div className="data-table" style={{ marginTop: 10 }}>
+      {results.map((v) => <div className="table-row clickable" key={v.id} onClick={() => void selectVehicle(v)}>
+        <div className="job-icon"><CarFront size={17} /></div>
+        <div><strong>{v.registration_number}</strong><span>{[v.make, v.model].filter(Boolean).join(' ') || 'Vehicle'} · {v.customers?.full_name ?? 'Customer'}</span></div>
+        <ChevronRight size={17} className="row-arrow" />
+      </div>)}
+    </div>}
+    {query.trim().length >= 2 && !searching && results.length === 0 && <p className="muted" style={{ marginTop: 8 }}>No vehicles match &quot;{query}&quot;.</p>}
+    {selected && <div style={{ marginTop: 14, padding: 14, border: '1px solid #e3a8a1', borderRadius: 10, background: '#fdf6f5' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div><strong>{selected.registration_number}</strong><span className="muted" style={{ marginLeft: 8 }}>{[selected.make, selected.model].filter(Boolean).join(' ') || 'Vehicle'} · {selected.customers?.full_name ?? 'Customer'}</span></div>
+        <button className="text-button" onClick={() => { setSelected(null); setCounts(null); }}>Change vehicle</button>
+      </div>
+      {countsLoading ? <p className="muted" style={{ marginTop: 8 }}>Checking linked records...</p> : counts && <>
+        <p className="muted" style={{ marginTop: 8 }}>
+          {(counts.jobCards + counts.invoices + counts.quotations) === 0
+            ? 'No work orders, invoices, or quotations are linked to this vehicle — deleting it will not remove anything else.'
+            : `This will also permanently delete ${counts.jobCards} work order${counts.jobCards === 1 ? '' : 's'}, ${counts.invoices} invoice${counts.invoices === 1 ? '' : 's'}, and ${counts.quotations} quotation${counts.quotations === 1 ? '' : 's'} — plus any sales, payments, and debt records tied to those work orders.`}
+        </p>
+        <button className="button danger" style={{ marginTop: 10 }} disabled={purging} onClick={() => void purge()}><Trash2 size={15} /> {purging ? 'Deleting...' : 'Delete vehicle & full history'}</button>
+      </>}
+    </div>}
+  </section>;
 }
 
 // === USERS & ROLES ===
@@ -2968,6 +3132,18 @@ async function readFunctionsError(error: unknown, fallback: string): Promise<str
   return fallback;
 }
 
+const PERM_CATEGORY_LABELS: Record<string, string> = {
+  dashboard: 'Dashboard', customer: 'Customers', vehicle: 'Vehicles', job: 'Work orders',
+  inventory: 'Inventory', quotation: 'Quotations', invoice: 'Invoices', payment: 'Payments',
+  sales: 'Sales', purchase_order: 'Procurement', supplier: 'Suppliers', receipt: 'Receipts',
+  scrap: 'Scrap module', debt: 'Debt register', report: 'Reports', audit: 'Audit log',
+  users: 'Users & roles', settings: 'Settings',
+};
+function permCategoryLabel(key: string): string {
+  const prefix = key.split('.')[0];
+  return PERM_CATEGORY_LABELS[prefix] ?? (prefix.charAt(0).toUpperCase() + prefix.slice(1).replaceAll('_', ' '));
+}
+
 function UsersSection({ onNotice }: { onNotice: (m: string) => void }) {
   const [roles, setRoles] = useState<Role[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
@@ -2976,6 +3152,10 @@ function UsersSection({ onNotice }: { onNotice: (m: string) => void }) {
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
   const [showCreateAccount, setShowCreateAccount] = useState(false);
+  const [selfId, setSelfId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('ALL');
+  useEffect(() => { supabase.auth.getUser().then(({ data }) => setSelfId(data.user?.id ?? null)); }, []);
 
   async function loadAll() {
     const [r, p, rp, s] = await Promise.all([
@@ -3017,36 +3197,101 @@ function UsersSection({ onNotice }: { onNotice: (m: string) => void }) {
   async function reactivate(userId: string) { if (await callAdmin({ action: 'reactivate', userId })) { onNotice('User reactivated.'); void loadAll(); } }
   async function disable(userId: string) { if (await callAdmin({ action: 'disable', userId })) { onNotice('User disabled.'); void loadAll(); } }
   async function changeRole(userId: string, roleId: string) { if (await callAdmin({ action: 'changeRole', userId, roleId })) { onNotice('Role updated.'); void loadAll(); } }
+  async function deleteUser(userId: string, name: string) {
+    const typed = window.prompt(`This permanently deletes the account for ${name}, including their login and role history. This cannot be undone.\n\nType DELETE to confirm.`);
+    if (typed === null) return;
+    if (typed.trim().toUpperCase() !== 'DELETE') { onNotice('Deletion cancelled — confirmation text did not match.'); return; }
+    if (await callAdmin({ action: 'delete', userId })) { onNotice('User account permanently deleted.'); void loadAll(); }
+  }
 
   if (loading) return <Loading />;
+
+  const counts = {
+    total: staff.length,
+    active: staff.filter((s) => s.status === 'ACTIVE').length,
+    invited: staff.filter((s) => s.status === 'INVITED').length,
+    suspended: staff.filter((s) => s.status === 'SUSPENDED' || s.status === 'DISABLED').length,
+  };
+  const filteredStaff = staff.filter((person) => {
+    const q = search.trim().toLowerCase();
+    if (q && !(person.full_name?.toLowerCase().includes(q) || person.phone?.toLowerCase().includes(q))) return false;
+    if (roleFilter !== 'ALL' && (person.user_roles?.[0]?.role_id ?? '') !== roleFilter) return false;
+    return true;
+  });
+  const permsByCategory = new Map<string, Permission[]>();
+  for (const p of permissions) {
+    const cat = permCategoryLabel(p.key);
+    if (!permsByCategory.has(cat)) permsByCategory.set(cat, []);
+    permsByCategory.get(cat)!.push(p);
+  }
+  const categories = Array.from(permsByCategory.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+
   return <>
     <div className="page-heading"><div><p className="eyebrow">Access control</p><h1>Users & Roles</h1><p className="muted">Invite employees, manage account access, and configure role permissions.</p></div><div className="heading-actions"><button className="button secondary" onClick={() => setShowCreateAccount(true)}><Plus size={16} /> Create account</button><button className="button primary" onClick={() => setShowInvite(true)}><Plus size={16} /> Invite employee</button></div></div>
 
+    <div className="detail-info-grid" style={{ marginBottom: 20 }}>
+      <div className="info-card"><Users size={16} /> <div><span>Total staff</span><strong>{counts.total}</strong></div></div>
+      <div className="info-card"><CheckCircle2 size={16} /> <div><span>Active</span><strong>{counts.active}</strong></div></div>
+      <div className="info-card"><Clock size={16} /> <div><span>Invited, not yet active</span><strong>{counts.invited}</strong></div></div>
+      <div className="info-card"><Ban size={16} /> <div><span>Suspended / disabled</span><strong>{counts.suspended}</strong></div></div>
+    </div>
+
     <section className="panel table-panel" style={{ marginBottom: 24 }}>
-      <div className="panel-heading"><div><p className="eyebrow">Directory</p><h3>Staff</h3></div></div>
-      {staff.length === 0 ? <Empty title="No staff yet" text="Invite your first employee to get started." /> : <div className="data-table">{staff.map((person) => {
+      <div className="panel-heading"><div><p className="eyebrow">Directory</p><h3>Staff ({filteredStaff.length})</h3></div></div>
+      <div className="filter-bar">
+        <Search size={15} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or phone..." />
+      </div>
+      <div className="filter-bar" style={{ marginTop: -6 }}>
+        <Filter size={15} />
+        <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
+          <option value="ALL">All roles</option>
+          {roles.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+        </select>
+      </div>
+      {filteredStaff.length === 0 ? <Empty title={staff.length === 0 ? 'No staff yet' : 'No staff match your search'} text={staff.length === 0 ? 'Invite your first employee to get started.' : 'Try a different name, phone number, or role filter.'} /> : <div className="data-table">{filteredStaff.map((person) => {
         const roleId = person.user_roles?.[0]?.role_id ?? '';
+        const roleName = person.user_roles?.[0]?.roles?.name;
+        const isSelf = person.id === selfId;
         return <div className="table-row" key={person.id}>
-          <div className="job-icon"><UserCog size={17} /></div>
-          <div><strong>{person.full_name || 'Unnamed'}</strong><span>{person.phone ?? '—'}</span></div>
-          <select value={roleId} onChange={(e) => void changeRole(person.id, e.target.value)} disabled={!person.user_roles?.[0]}>
+          <div className={`avatar small-avatar${roleName === 'ADMIN' ? ' admin' : ''}`}>{(person.full_name || '?').slice(0, 1).toUpperCase()}</div>
+          <div><strong>{person.full_name || 'Unnamed'}{isSelf && <span className="table-subtext" style={{ marginLeft: 6 }}>(You)</span>}</strong><span>{person.phone ?? 'No phone on file'}</span></div>
+          <select value={roleId} onChange={(e) => void changeRole(person.id, e.target.value)} disabled={!person.user_roles?.[0]} style={{ minWidth: 150 }}>
             <option value="" disabled>No role</option>
             {roles.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
           </select>
           <span className={`status ${statusStyles[person.status] ?? 'bg-slate-100 text-slate-600'}`}>{person.status}</span>
           <div className="action-buttons">
-            {person.status === 'SUSPENDED' || person.status === 'DISABLED'
-              ? <button className="button secondary small" onClick={() => void reactivate(person.id)}>Reactivate</button>
-              : <button className="button secondary small" onClick={() => void suspend(person.id)}>Suspend</button>}
-            {person.status !== 'DISABLED' && <button className="button secondary small" onClick={() => void disable(person.id)}>Disable</button>}
+            {!isSelf && (person.status === 'SUSPENDED' || person.status === 'DISABLED'
+              ? <button className="button secondary small" onClick={() => void reactivate(person.id)}><CheckCircle2 size={14} /> Reactivate</button>
+              : <button className="button secondary small" onClick={() => void suspend(person.id)}><Ban size={14} /> Suspend</button>)}
+            {!isSelf && person.status !== 'DISABLED' && <button className="button secondary small" onClick={() => void disable(person.id)}><DoorOpen size={14} /> Disable</button>}
+            {!isSelf && <button className="button danger small" onClick={() => void deleteUser(person.id, person.full_name || 'this user')}><Trash2 size={14} /> Delete</button>}
+            {isSelf && <span className="muted" style={{ fontSize: 12 }}>This is your own account</span>}
           </div>
         </div>;
       })}</div>}
     </section>
 
+    <div className="page-heading" style={{ marginBottom: 12 }}><div><p className="eyebrow">Access control</p><h1 style={{ fontSize: 24 }}>Role permissions</h1><p className="muted">What each role can see and do across the platform.</p></div></div>
+
     {roles.map((role) => <section className="panel" key={role.id} style={{ marginBottom: 16 }}>
-      <div className="panel-heading"><div><p className="eyebrow">{role.name}</p><h3>{role.label}</h3></div><span className="status bg-slate-100 text-slate-600">{rolePerms[role.id]?.length ?? 0} permissions</span></div>
-      <div className="perm-grid">{permissions.map((p) => <label key={p.id} className="perm-chip"><input type="checkbox" checked={role.name === 'ADMIN' || (rolePerms[role.id]?.includes(p.key) ?? false)} disabled={role.name === 'ADMIN'} onChange={() => void togglePerm(role.id, p.key)} />{p.key}</label>)}</div>
+      <div className="panel-heading">
+        <div><p className="eyebrow">{role.name}</p><h3>{role.label}</h3></div>
+        {role.name === 'ADMIN'
+          ? <span className="status bg-amber-50 text-amber-700"><ShieldCheck size={12} style={{ verticalAlign: -2, marginRight: 4 }} />Full access</span>
+          : <span className="status bg-slate-100 text-slate-600">{rolePerms[role.id]?.length ?? 0} of {permissions.length} permissions</span>}
+      </div>
+      {role.name === 'ADMIN'
+        ? <p className="muted" style={{ margin: 0 }}>Administrators can see and do everything in the platform, including managing staff, roles, and permanently deleting records. This can&apos;t be restricted.</p>
+        : <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            {categories.map(([cat, perms]) => {
+              const enabledCount = perms.filter((p) => rolePerms[role.id]?.includes(p.key)).length;
+              return <div key={cat}>
+                <p className="eyebrow" style={{ margin: '0 0 8px' }}>{cat} <span style={{ opacity: 0.6 }}>· {enabledCount}/{perms.length}</span></p>
+                <div className="perm-grid">{perms.map((p) => <label key={p.id} className="perm-chip"><input type="checkbox" checked={rolePerms[role.id]?.includes(p.key) ?? false} onChange={() => void togglePerm(role.id, p.key)} />{p.key}</label>)}</div>
+              </div>;
+            })}
+          </div>}
     </section>)}
 
     {showInvite && <InviteEmployeeForm roles={roles} onClose={() => setShowInvite(false)} onSaved={(m) => { setShowInvite(false); onNotice(m); void loadAll(); }} />}

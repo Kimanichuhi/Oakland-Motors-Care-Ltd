@@ -3,7 +3,8 @@ import { supabase } from '@/lib/supabase';
 import type { Sale } from '@/lib/types';
 import { formatKes, formatDateTime, downloadCSV, localDateStr } from '@/lib/formatting';
 import { statusStyles } from '@/lib/constants';
-import { Plus, Search, MoreVertical, Eye, Download, Printer, X } from 'lucide-react';
+import BulkSalesUploadDialog from '@/components/sales/BulkSalesUpload';
+import { Plus, Search, MoreVertical, Eye, Download, Printer, X, Upload } from 'lucide-react';
 
 type SaleItemRow = { part_name: string; part_sku: string; quantity: number; unit_price_minor: number; line_total_minor: number; shelf_count_at_sale: number | null; system_stock_after: number | null };
 type SaleRow = Sale & { job_cards: { job_number: string } | null; sale_items: SaleItemRow[] };
@@ -72,7 +73,7 @@ function SaleRowMenu({ onView }: { onView: () => void }) {
   );
 }
 
-export default function SalesSection({ query, onNew, onSelect, can }: { query: string; onNew: () => void; onSelect: (id: string) => void; can: (p: string) => boolean }) {
+export default function SalesSection({ query, onNew, onSelect, can, onNotice }: { query: string; onNew: () => void; onSelect: (id: string) => void; can: (p: string) => boolean; onNotice: (m: string) => void }) {
   const [sales, setSales] = useState<SaleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -80,6 +81,8 @@ export default function SalesSection({ query, onNew, onSelect, can }: { query: s
   const [toDate, setToDate] = useState('');
   const [productFilter, setProductFilter] = useState('');
   const [showPrint, setShowPrint] = useState(false);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -95,7 +98,7 @@ export default function SalesSection({ query, onNew, onSelect, can }: { query: s
     }
     void load();
     return () => { mounted = false; };
-  }, [query]);
+  }, [query, refreshKey]);
 
   const filteredSales = useMemo(() => {
     const term = productFilter.trim().toLowerCase();
@@ -149,8 +152,12 @@ export default function SalesSection({ query, onNew, onSelect, can }: { query: s
     <div>
       <div className="panel-heading">
         <div><p className="eyebrow">Spare parts sales</p><h3>Sales</h3></div>
-        <div>{can('sales.create') && <button className="button primary" onClick={onNew}><Plus size={15} /> New sale</button>}</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {can('sales.create') && <button className="button secondary" onClick={() => setShowBulkUpload(true)}><Upload size={15} /> Bulk upload</button>}
+          {can('sales.create') && <button className="button primary" onClick={onNew}><Plus size={15} /> New sale</button>}
+        </div>
       </div>
+      {showBulkUpload && <BulkSalesUploadDialog onClose={() => setShowBulkUpload(false)} onSaved={(m) => { setShowBulkUpload(false); onNotice(m); setRefreshKey((k) => k + 1); }} canOverridePrice={can('sales.price.override')} />}
 
       <div className="form-row modal-form" style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))', alignItems: 'end', marginBottom: 12 }}>
         <label>From<input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></label>

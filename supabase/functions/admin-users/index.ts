@@ -162,6 +162,26 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ success: true });
     }
 
+    if (action === "delete") {
+      const userId = String(body.userId ?? "");
+      if (!userId) return jsonResponse({ error: "userId is required" }, 400);
+      if (userId === caller.id) return jsonResponse({ error: "You cannot delete your own account" }, 400);
+
+      const { data: target } = await admin.from("profiles").select("full_name").eq("id", userId).maybeSingle();
+      const { error: deleteError } = await admin.auth.admin.deleteUser(userId);
+      if (deleteError) return jsonResponse({ error: deleteError.message }, 400);
+
+      await admin.from("audit_logs").insert({
+        actor_id: caller.id,
+        action: "USER_PURGED",
+        entity: "profiles",
+        entity_id: userId,
+        before_state: target ? { full_name: target.full_name } : null,
+      });
+
+      return jsonResponse({ success: true });
+    }
+
     return jsonResponse({ error: "Unknown action" }, 400);
   } catch (err) {
     return jsonResponse({ error: err instanceof Error ? err.message : "Unexpected error" }, 500);
