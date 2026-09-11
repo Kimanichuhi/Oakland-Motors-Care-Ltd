@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { Sale } from '@/lib/types';
-import { formatKes, formatDateTime, downloadCSV, localDateStr } from '@/lib/formatting';
+import { formatKes, formatDate, downloadCSV, localDateStr } from '@/lib/formatting';
 import { statusStyles } from '@/lib/constants';
 import BulkSalesUploadDialog from '@/components/sales/BulkSalesUpload';
 import { Plus, Search, MoreVertical, Eye, Download, Printer, X, Upload } from 'lucide-react';
@@ -189,6 +189,8 @@ export default function SalesSection({ query, onNew, onSelect, can, onNotice }: 
                   <th className="numeric">Total</th>
                   <th className="numeric">Debt</th>
                   <th>Cash/M-Pesa/Banked</th>
+                  <th className="numeric">Remaining Stock at Shelves</th>
+                  <th className="numeric">System Remaining Stock</th>
                   <th>Status</th>
                   <th />
                 </tr>
@@ -196,7 +198,7 @@ export default function SalesSection({ query, onNew, onSelect, can, onNotice }: 
               <tbody>
                 {filteredSales.map((s) => (
                   <tr key={s.id} className="clickable" onClick={() => onSelect(s.id)}>
-                    <td>{formatDateTime(s.sale_date)}</td>
+                    <td>{formatDate(s.sale_date)}</td>
                     <td>{s.sale_number}</td>
                     <td>{s.job_cards?.job_number ?? '—'}</td>
                     <td>{s.customer_name || CUSTOMER_TYPE_LABELS[s.customer_type] || s.customer_type.replaceAll('_', ' ')}</td>
@@ -206,6 +208,8 @@ export default function SalesSection({ query, onNew, onSelect, can, onNotice }: 
                     <td className="numeric">{formatKes(s.total_minor)}</td>
                     <td className="numeric" style={s.balance_minor > 0 ? { color: '#a4493d', fontWeight: 700 } : undefined}>{formatKes(s.balance_minor)}</td>
                     <td>{paymentSummary(s)}</td>
+                    <td className="numeric">{joinField(s.sale_items, (i) => i.shelf_count_at_sale)}</td>
+                    <td className="numeric">{joinField(s.sale_items, (i) => i.system_stock_after)}</td>
                     <td><span className={`status ${statusStyles[s.status] ?? ''}`}>{s.status.replaceAll('_', ' ')}</span></td>
                     <td><SaleRowMenu onView={() => onSelect(s.id)} /></td>
                   </tr>

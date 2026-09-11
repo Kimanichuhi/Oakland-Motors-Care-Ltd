@@ -46,6 +46,19 @@ export default function BulkSalesUploadDialog({ onClose, onSaved, canOverridePri
     } finally { setParsing(false); }
   }
 
+  function updateShelfCount(index: number, value: string) {
+    setPlanned((prev) => {
+      if (!prev) return prev;
+      const row = prev[index];
+      if (row.action !== 'SALE' || !row.payload) return prev;
+      const parsed = value.trim() === '' ? null : parseInt(value, 10);
+      const shelfCount = parsed !== null && Number.isFinite(parsed) ? parsed : null;
+      const next = [...prev];
+      next[index] = { ...row, payload: { ...row.payload, p_items: [{ ...row.payload.p_items[0], shelf_count: shelfCount }] } };
+      return next;
+    });
+  }
+
   const actionable = (planned ?? []).filter((r) => r.action === 'SALE');
   const errorRows = (planned ?? []).filter((r) => r.action === 'ERROR');
   const dayWarningRows = (planned ?? []).filter((r) => r.rowNumber === -1);
@@ -79,7 +92,7 @@ export default function BulkSalesUploadDialog({ onClose, onSaved, canOverridePri
 
         {!planned && !parsing && (
           <div className="modal-form">
-            <p className="muted" style={{ margin: 0 }}>Upload the daily sales day book (one row per part sold). Each row checks the part exists and has enough stock, then records a sale and deducts stock automatically — the same way completing a sale in the app does. Rows with no part on them (day totals, blank spacer rows) are skipped; rows for a part not yet in the Parts module are flagged as errors, not guessed at.</p>
+            <p className="muted" style={{ margin: 0 }}>Upload the daily sales day book (one row per part sold). Each row checks the part exists and has enough stock, then records a sale and deducts stock automatically — the same way completing a sale in the app does. Rows with no part on them (day totals, blank spacer rows) are skipped; rows for a part not yet in the Parts module are flagged as errors, not guessed at. Shelf count comes from the file but can be corrected in the preview below; system remaining stock is always computed automatically from actual stock, never editable.</p>
             {!canOverridePrice && <p className="form-error" style={{ margin: 0 }}><AlertTriangle size={14} /> You don&apos;t have price-override access. Historical sales almost always sell at a different price than the part&apos;s current selling price, which requires it — ask an admin to run this upload, or grant you that permission first.</p>}
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" className="button secondary wide" onClick={downloadSalesTemplate}><Download size={16} /> Download template</button>
@@ -102,11 +115,21 @@ export default function BulkSalesUploadDialog({ onClose, onSaved, canOverridePri
             {priceOverrideNeeded && !canOverridePrice && <div className="form-error"><AlertTriangle size={14} /> Some rows sell below/above the part&apos;s current price and will fail without price-override access.</div>}
             {dayWarningRows.map((r, i) => <div key={i} className="form-error" style={{ fontSize: 12 }}><AlertTriangle size={12} style={{ verticalAlign: -1 }} /> {r.warnings.join(' ')}</div>)}
             <div className="report-table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
-              <table className="report-table"><thead><tr><th>Date</th><th>SKU</th><th>Action</th><th>Details</th></tr></thead><tbody>
-                {planned.filter((r) => r.action !== 'SKIP').map((r, i) => <tr key={i}>
+              <table className="report-table"><thead><tr><th>Date</th><th>SKU</th><th>Action</th><th>Shelf count</th><th>Details</th></tr></thead><tbody>
+                {planned.map((r, i) => ({ r, i })).filter(({ r }) => r.action !== 'SKIP').map(({ r, i }) => <tr key={i}>
                   <td>{formatDate(r.date)}</td>
                   <td>{r.sku || '—'}</td>
                   <td><span className={`status ${r.action === 'SALE' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>{r.action}</span></td>
+                  <td>
+                    {r.action === 'SALE' && <input
+                      type="number" min={0}
+                      value={r.payload?.p_items[0]?.shelf_count ?? ''}
+                      onChange={(e) => updateShelfCount(i, e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      placeholder="—"
+                      style={{ width: 70, border: '1px solid #dfe5ea', borderRadius: 6, padding: '5px 6px', fontSize: 12 }}
+                    />}
+                  </td>
                   <td style={{ fontSize: 11 }}>
                     {r.errors.map((e, j) => <div key={j} style={{ color: '#a4493d' }}><AlertTriangle size={11} style={{ verticalAlign: -1 }} /> {e}</div>)}
                     {r.summary.map((s, j) => <div key={j}>{s}</div>)}

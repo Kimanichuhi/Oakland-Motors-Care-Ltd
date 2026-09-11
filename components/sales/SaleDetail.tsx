@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { Sale, SaleItem } from '@/lib/types';
-import { formatKes, formatDateTime, displayToMinor } from '@/lib/formatting';
+import { formatKes, formatDate, formatDateTime, displayToMinor } from '@/lib/formatting';
 import { statusStyles, SALES_PAYMENT_METHODS, SALES_PAYMENT_STATUSES, CUSTOMER_SALE_TYPES } from '@/lib/constants';
 import { purgeRecord } from '@/lib/purge';
 import { ShoppingCart, ChevronRight, User, CarFront, CreditCard, CircleDollarSign, Calendar, FileText, Ban, Trash2, Edit, X } from 'lucide-react';
@@ -55,7 +55,7 @@ export default function SaleDetail({ id, onBack, onNotice, can }: { id: string; 
       <div className="back-bar"><button onClick={onBack}><ChevronRight size={16} className="back-icon" /> Sales</button></div>
       <div className="detail-header">
         <div className="detail-avatar"><ShoppingCart size={22} /></div>
-        <div className="flex-1"><h2>{sale.sale_number}</h2><p className="muted">{sale.customer_name || sale.customer_type.replaceAll('_', ' ')}{sale.customer_phone ? ` · ${sale.customer_phone}` : ''}{sale.job_cards?.job_number ? ` · Work Order ${sale.job_cards.job_number}` : ''} · {formatDateTime(sale.sale_date)}</p></div>
+        <div className="flex-1"><h2>{sale.sale_number}</h2><p className="muted">{sale.customer_name || sale.customer_type.replaceAll('_', ' ')}{sale.customer_phone ? ` · ${sale.customer_phone}` : ''}{sale.job_cards?.job_number ? ` · Work Order ${sale.job_cards.job_number}` : ''} · {formatDate(sale.sale_date)}</p></div>
         <span className={`status ${statusStyles[sale.status] ?? ''}`}>{sale.status.replaceAll('_', ' ')}</span>
       </div>
 
