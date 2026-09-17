@@ -4,9 +4,11 @@ import type { Sale, SaleItem } from '@/lib/types';
 import { formatKes, formatDate, formatDateTime, displayToMinor } from '@/lib/formatting';
 import { statusStyles, SALES_PAYMENT_METHODS, SALES_PAYMENT_STATUSES, CUSTOMER_SALE_TYPES } from '@/lib/constants';
 import { purgeRecord } from '@/lib/purge';
-import { ShoppingCart, ChevronRight, User, CarFront, CreditCard, CircleDollarSign, Calendar, FileText, Ban, Trash2, Edit, X } from 'lucide-react';
+import { ShoppingCart, ChevronRight, User, CarFront, CreditCard, CircleDollarSign, Calendar, FileText, Ban, Trash2, Edit, X, HandCoins } from 'lucide-react';
 
 type SaleWithItems = Sale & { sale_items: SaleItem[]; job_cards: { job_number: string } | null };
+
+const SETTLE_PAYMENT_METHODS = ['CASH', 'MPESA', 'BANK', 'CARD', 'OTHER'] as const;
 
 export default function SaleDetail({ id, onBack, onNotice, can }: { id: string; onBack: () => void; onNotice?: (m: string) => void; can: (p: string) => boolean }) {
   const [sale, setSale] = useState<SaleWithItems | null>(null);
@@ -14,6 +16,7 @@ export default function SaleDetail({ id, onBack, onNotice, can }: { id: string; 
   const [voiding, setVoiding] = useState(false);
   const [purging, setPurging] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [showSettle, setShowSettle] = useState(false);
   const [loadError, setLoadError] = useState('');
 
   const load = useCallback(async () => {
@@ -66,8 +69,18 @@ export default function SaleDetail({ id, onBack, onNotice, can }: { id: string; 
         {sale.technician_name && <div className="info-card"><User size={16} /> <div><span>Technician (buyer)</span><strong>{sale.technician_name}</strong></div></div>}
         {(sale.vehicle_reg || sale.vehicle_model) && <div className="info-card"><CarFront size={16} /> <div><span>Vehicle</span><strong>{[sale.vehicle_reg, sale.vehicle_model].filter(Boolean).join(' · ')}</strong></div></div>}
         {sale.change_in_days > 0 && <div className="info-card"><Calendar size={16} /> <div><span>Change in days</span><strong>{sale.change_in_days}</strong></div></div>}
-        <div className="info-card"><CircleDollarSign size={16} /> <div><span>Balance due</span><strong>{formatKes(sale.balance_minor)}</strong></div></div>
+        <div className="info-card"><CircleDollarSign size={16} /> <div><span>Balance due</span><strong style={sale.balance_minor > 0 ? { color: '#a4493d' } : undefined}>{formatKes(sale.balance_minor)}</strong></div></div>
       </div>
+
+      {sale.balance_minor > 0 && sale.status !== 'VOIDED' && (
+        <section className="panel" style={{ marginTop: 20, borderColor: '#f0d9c9' }}>
+          <div className="panel-heading">
+            <div><p className="eyebrow">Outstanding</p><h3>This sale is on debt</h3></div>
+          </div>
+          <p className="muted" style={{ marginTop: -6 }}>{formatKes(sale.balance_minor)} of {formatKes(sale.total_minor)} is still owed{sale.customer_name ? ` by ${sale.customer_name}` : ''}.</p>
+          {can('payment.create') && <button className="button primary" onClick={() => setShowSettle(true)}><HandCoins size={16} /> Settle debt</button>}
+        </section>
+      )}
 
       <section className="panel" style={{ marginTop: 20 }}>
         <div className="panel-heading"><div><p className="eyebrow">Items</p><h3>Sale items</h3></div></div>
@@ -106,6 +119,68 @@ export default function SaleDetail({ id, onBack, onNotice, can }: { id: string; 
       </div>
 
       {showEdit && <SaleEditForm sale={sale} onClose={() => setShowEdit(false)} onSaved={(m) => { setShowEdit(false); onNotice?.(m); void load(); }} />}
+      {showSettle && <SettleDebtForm sale={sale} onClose={() => setShowSettle(false)} onSaved={(m) => { setShowSettle(false); onNotice?.(m); void load(); }} />}
+    </div>
+  );
+}
+
+function SettleDebtForm({ sale, onClose, onSaved }: { sale: SaleWithItems; onClose: () => void; onSaved: (m: string) => void }) {
+  const [mode, setMode] = useState<'FULL' | 'PARTIAL'>('FULL');
+  const [amountDisplay, setAmountDisplay] = useState((sale.balance_minor / 100).toString());
+  const [method, setMethod] = useState<(typeof SETTLE_PAYMENT_METHODS)[number]>('CASH');
+  const [mpesaCode, setMpesaCode] = useState('');
+  const [mpesaSentAt, setMpesaSentAt] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const isMpesa = method === 'MPESA';
+  const amountMinor = mode === 'FULL' ? sale.balance_minor : displayToMinor(parseFloat(amountDisplay) || 0);
+  const remainingAfter = Math.max(0, sale.balance_minor - amountMinor);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    if (amountMinor <= 0) { setError('Enter an amount greater than zero.'); return; }
+    if (amountMinor > sale.balance_minor) { setError(`Amount cannot exceed the outstanding balance of ${formatKes(sale.balance_minor)}.`); return; }
+    if (isMpesa && !mpesaCode.trim()) { setError('Enter the M-Pesa transaction code.'); return; }
+
+    setBusy(true);
+    const { error: rpcError } = await supabase.rpc('record_sale_payment', {
+      p_sale_id: sale.id,
+      p_amount_minor: amountMinor,
+      p_method: method,
+      p_reference: isMpesa ? mpesaCode.trim() : null,
+      p_reference_at: isMpesa && mpesaSentAt ? new Date(mpesaSentAt).toISOString() : null,
+    });
+    setBusy(false);
+    if (rpcError) { setError(rpcError.message || 'Unable to record this payment.'); return; }
+    onSaved(remainingAfter <= 0 ? `Sale ${sale.sale_number} is now fully paid.` : `Payment recorded — ${formatKes(remainingAfter)} still outstanding.`);
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" style={{ width: 'min(480px, 100%)' }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-heading"><div><p className="eyebrow">{sale.sale_number}</p><h2>Settle debt</h2></div><button className="close-button" onClick={onClose}><X size={18} /></button></div>
+        <form onSubmit={submit} className="modal-form">
+          <p className="muted" style={{ margin: 0 }}>Outstanding balance: <strong>{formatKes(sale.balance_minor)}</strong> of {formatKes(sale.total_minor)} total.</p>
+          <div className="action-buttons">
+            <button type="button" className={mode === 'FULL' ? 'button primary' : 'button secondary'} onClick={() => { setMode('FULL'); setAmountDisplay((sale.balance_minor / 100).toString()); }}>Full payment</button>
+            <button type="button" className={mode === 'PARTIAL' ? 'button primary' : 'button secondary'} onClick={() => setMode('PARTIAL')}>Partial payment</button>
+          </div>
+          {mode === 'PARTIAL' && <label>Amount received (KES)<input type="number" min={0.01} max={sale.balance_minor / 100} step="0.01" value={amountDisplay} onChange={(e) => setAmountDisplay(e.target.value)} required /></label>}
+          <label>Payment method<select value={method} onChange={(e) => setMethod(e.target.value as typeof method)}>{SETTLE_PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m.replaceAll('_', ' ')}</option>)}</select></label>
+          {isMpesa && <div className="form-row">
+            <label>M-Pesa transaction code<input value={mpesaCode} onChange={(e) => setMpesaCode(e.target.value.toUpperCase())} required /></label>
+            <label>Time money was sent <span className="optional">Optional</span><input type="datetime-local" value={mpesaSentAt} onChange={(e) => setMpesaSentAt(e.target.value)} /></label>
+          </div>}
+          <p className="muted" style={{ margin: 0 }}>Remaining balance after this payment: <strong>{formatKes(remainingAfter)}</strong></p>
+          {error && <div className="form-error">{error}</div>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" className="button secondary" onClick={onClose}>Cancel</button>
+            <button type="submit" className="button primary wide" disabled={busy}>{busy ? 'Saving…' : 'Record payment'}</button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

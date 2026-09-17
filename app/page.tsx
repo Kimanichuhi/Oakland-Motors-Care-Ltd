@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
 import { toPng } from 'html-to-image';
 import { supabase } from '@/lib/supabase';
 import { formatKes, formatDate, formatDateTime, computeLineTotal, downloadCSV, formatKg, localDateStr, localDayStart, localDayEnd } from '@/lib/formatting';
@@ -32,6 +33,7 @@ import DebtsOverviewPage from '@/components/debts/DebtsOverviewPage';
 import DebtRegisterPage from '@/components/debts/DebtRegisterPage';
 import DebtReportsPage from '@/components/debts/DebtReportsPage';
 import VehicleRegisterSection from '@/components/vehicle-register/VehicleRegisterSection';
+import ListPagination, { PAGE_SIZE } from '@/components/ui/ListPagination';
 
 type SectionId =
   | 'dashboard' | 'customers' | 'vehicles' | 'vehicleregister' | 'jobcards' | 'services' | 'technicians'
@@ -477,7 +479,7 @@ function SectionRouter(props: SectionProps) {
     case 'scraptypes': return <ScrapTypesPage can={p.can} onNotice={p.onNotice} />;
     case 'debtsoverview': return <DebtsOverviewPage onNavigateToRegister={() => p.setSection('debtregister')} onNavigateToReports={() => p.setSection('debtreports')} />;
     case 'debtregister': return <DebtRegisterPage can={p.can} onNotice={p.onNotice} />;
-    case 'debtreports': return <DebtReportsPage onSelectJob={(id) => { p.setSelectedJobId(id); p.setSection('jobcards'); }} />;
+    case 'debtreports': return <DebtReportsPage onSelectJob={(id) => { p.setSelectedJobId(id); p.setSection('jobcards'); }} onSelectSale={(id) => { p.setSelectedSaleId(id); p.setSection('sales'); }} />;
     case 'vehicleregister': return <VehicleRegisterSection can={p.can} onNotice={p.onNotice} />;
     case 'payments': return <PaymentsSection onNotice={p.onNotice} />;
     case 'receipts': return <ReceiptsSection onNotice={p.onNotice} can={p.can} />;
@@ -536,7 +538,7 @@ function AuthScreen({ error, setError }: { error: string; setError: (v: string) 
 
   if (mode === 'forgot') {
     return <div className="auth-layout"><div className="auth-panel"><div className="auth-card">
-      <img src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" />
+      <Image src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" width={1774} height={887} priority />
       <h2>Reset your password</h2>
       <p className="muted">Enter your work email and we&apos;ll send you a link to set a new password.</p>
       {resetSent
@@ -553,7 +555,7 @@ function AuthScreen({ error, setError }: { error: string; setError: (v: string) 
     </div></div></div>;
   }
 
-  return <div className="auth-layout"><div className="auth-panel"><div className="auth-card"><img src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" /><h2>Welcome back</h2><p className="muted">Sign in to continue.</p><form onSubmit={submit}><label>Work email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@oaklandmotorcare.co.ke" required /></label><label>Password<PasswordInput value={password} onChange={setPassword} placeholder="Enter your password" minLength={6} required autoComplete="current-password" /></label>{error && <div className="form-error">{error}</div>}<button className="button primary wide" disabled={busy}>{busy ? 'Please wait...' : 'Sign in'} <ArrowUpRight size={17} /></button><button className="switch-auth" type="button" onClick={() => { setMode('forgot'); setError(''); }}>Forgot password?</button></form><PoweredByFooter /></div></div></div>;
+  return <div className="auth-layout"><div className="auth-panel"><div className="auth-card"><Image src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" width={1774} height={887} priority /><h2>Welcome back</h2><p className="muted">Sign in to continue.</p><form onSubmit={submit}><label>Work email<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@oaklandmotorcare.co.ke" required /></label><label>Password<PasswordInput value={password} onChange={setPassword} placeholder="Enter your password" minLength={6} required autoComplete="current-password" /></label>{error && <div className="form-error">{error}</div>}<button className="button primary wide" disabled={busy}>{busy ? 'Please wait...' : 'Sign in'} <ArrowUpRight size={17} /></button><button className="switch-auth" type="button" onClick={() => { setMode('forgot'); setError(''); }}>Forgot password?</button></form><PoweredByFooter /></div></div></div>;
 }
 
 function ResetPasswordScreen({ onDone }: { onDone: () => void }) {
@@ -579,7 +581,7 @@ function ResetPasswordScreen({ onDone }: { onDone: () => void }) {
   }
 
   return <div className="auth-layout"><div className="auth-panel"><div className="auth-card">
-    <img src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" />
+    <Image src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" width={1774} height={887} priority />
     <h2>Set a new password</h2>
     <p className="muted">Choose a new password for your account.</p>
     <form onSubmit={submit}>
@@ -593,7 +595,7 @@ function ResetPasswordScreen({ onDone }: { onDone: () => void }) {
 
 function AccountInactiveScreen({ onSignOut }: { onSignOut: () => void }) {
   return <div className="auth-layout"><div className="auth-panel"><div className="auth-card">
-    <img src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" />
+    <Image src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" width={1774} height={887} priority />
     <div className="auth-icon"><ShieldCheck size={22} /></div>
     <h2>Account not active</h2>
     <p className="muted">Your account doesn&apos;t have an active role yet, or has been suspended. Contact your administrator to get access.</p>
@@ -741,26 +743,32 @@ function Metric({ label, value, trend, icon, tone, onClick }: { label: string; v
 // === CUSTOMERS ===
 function CustomersSection({ query, onNew, onSelect, can }: { query: string; onNew: () => void; onSelect: (id: string) => void; can: (p: string) => boolean }) {
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(0);
+  useEffect(() => { setPage(0); }, [query]);
   useEffect(() => {
     (async () => {
-      let q = supabase.from('customers').select('*').is('deleted_at', null).order('created_at', { ascending: false });
+      let q = supabase.from('customers').select('*', { count: 'exact' }).is('deleted_at', null).order('created_at', { ascending: false });
       if (query) q = q.or(`full_name.ilike.%${query}%,phone.ilike.%${query}%,email.ilike.%${query}%`);
-      const { data } = await q.limit(100);
-      setCustomers((data ?? []) as Customer[]); setLoading(false);
+      const { data, count } = await q.range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+      setCustomers((data ?? []) as Customer[]); setTotal(count ?? 0); setLoading(false);
     })();
-  }, [query]);
+  }, [query, page]);
   return <SectionPanel eyebrow="Directory" title="Customers" onNew={can('customer.create') ? onNew : undefined} newLabel="Add customer">
-    {loading ? <Loading /> : customers.length === 0 ? <Empty title="No customers found" text="Register your first customer to get started." /> : <div className="report-table-wrap"><table className="report-table"><thead><tr>
-      <th>Name</th><th>Phone</th><th>Email</th><th>Type</th><th>Status</th><th />
-    </tr></thead><tbody>{customers.map((c) => <tr key={c.id} className="clickable" onClick={() => onSelect(c.id)}>
-      <td><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><div className="avatar small-avatar">{c.full_name.slice(0, 1)}</div><strong>{c.full_name}</strong></div>{c.company_name && <span className="table-subtext">{c.company_name}</span>}</td>
-      <td>{c.phone}</td>
-      <td>{c.email ?? '—'}</td>
-      <td>{c.customer_type.replaceAll('_', ' ')}</td>
-      <td><span className={`status ${statusStyles[c.status] ?? ''}`}>{c.status}</span></td>
-      <td><ChevronRight size={17} className="row-arrow" /></td>
-    </tr>)}</tbody></table></div>}
+    {loading ? <Loading /> : customers.length === 0 ? <Empty title="No customers found" text="Register your first customer to get started." /> : <>
+      <div className="report-table-wrap"><table className="report-table"><thead><tr>
+        <th>Name</th><th>Phone</th><th>Email</th><th>Type</th><th>Status</th><th />
+      </tr></thead><tbody>{customers.map((c) => <tr key={c.id} className="clickable" onClick={() => onSelect(c.id)}>
+        <td><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><div className="avatar small-avatar">{c.full_name.slice(0, 1)}</div><strong>{c.full_name}</strong></div>{c.company_name && <span className="table-subtext">{c.company_name}</span>}</td>
+        <td>{c.phone}</td>
+        <td>{c.email ?? '—'}</td>
+        <td>{c.customer_type.replaceAll('_', ' ')}</td>
+        <td><span className={`status ${statusStyles[c.status] ?? ''}`}>{c.status}</span></td>
+        <td><ChevronRight size={17} className="row-arrow" /></td>
+      </tr>)}</tbody></table></div>
+      <ListPagination page={page} total={total} onPageChange={setPage} />
+    </>}
   </SectionPanel>;
 }
 
@@ -815,26 +823,32 @@ function CustomerDetail({ id, onBack, onNewVehicle, onNewJob, can, onNotice }: {
 // === VEHICLES ===
 function VehiclesSection({ query, onSelect }: { query: string; onSelect: (id: string) => void }) {
   const [vehicles, setVehicles] = useState<(Vehicle & { customers: { full_name: string } | null })[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(0);
+  useEffect(() => { setPage(0); }, [query]);
   useEffect(() => {
     (async () => {
-      let q = supabase.from('vehicles').select('*, customers(full_name)').is('deleted_at', null).order('created_at', { ascending: false });
+      let q = supabase.from('vehicles').select('*, customers(full_name)', { count: 'exact' }).is('deleted_at', null).order('created_at', { ascending: false });
       if (query) q = q.or(`registration_number.ilike.%${query}%,make.ilike.%${query}%,model.ilike.%${query}%,vin.ilike.%${query}%`);
-      const { data } = await q.limit(100);
-      setVehicles((data ?? []) as (Vehicle & { customers: { full_name: string } | null })[]); setLoading(false);
+      const { data, count } = await q.range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+      setVehicles((data ?? []) as (Vehicle & { customers: { full_name: string } | null })[]); setTotal(count ?? 0); setLoading(false);
     })();
-  }, [query]);
+  }, [query, page]);
   return <SectionPanel eyebrow="Fleet records" title="Vehicles">
-    {loading ? <Loading /> : vehicles.length === 0 ? <Empty title="No vehicles recorded" text="Vehicles will appear here after you register a customer." /> : <div className="report-table-wrap"><table className="report-table"><thead><tr>
-      <th>Reg. No.</th><th>Make / Model</th><th className="numeric">Year</th><th>Owner</th><th className="numeric">Mileage</th><th />
-    </tr></thead><tbody>{vehicles.map((v) => <tr key={v.id} className="clickable" onClick={() => onSelect(v.id)}>
-      <td><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><div className="job-icon"><CarFront size={17} /></div><strong>{v.registration_number}</strong></div></td>
-      <td>{[v.make, v.model].filter(Boolean).join(' ') || '—'}</td>
-      <td className="numeric">{v.year ?? '—'}</td>
-      <td>{v.customers?.full_name ?? '—'}</td>
-      <td className="numeric">{v.mileage.toLocaleString()} KM</td>
-      <td><ChevronRight size={17} className="row-arrow" /></td>
-    </tr>)}</tbody></table></div>}
+    {loading ? <Loading /> : vehicles.length === 0 ? <Empty title="No vehicles recorded" text="Vehicles will appear here after you register a customer." /> : <>
+      <div className="report-table-wrap"><table className="report-table"><thead><tr>
+        <th>Reg. No.</th><th>Make / Model</th><th className="numeric">Year</th><th>Owner</th><th className="numeric">Mileage</th><th />
+      </tr></thead><tbody>{vehicles.map((v) => <tr key={v.id} className="clickable" onClick={() => onSelect(v.id)}>
+        <td><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><div className="job-icon"><CarFront size={17} /></div><strong>{v.registration_number}</strong></div></td>
+        <td>{[v.make, v.model].filter(Boolean).join(' ') || '—'}</td>
+        <td className="numeric">{v.year ?? '—'}</td>
+        <td>{v.customers?.full_name ?? '—'}</td>
+        <td className="numeric">{v.mileage.toLocaleString()} KM</td>
+        <td><ChevronRight size={17} className="row-arrow" /></td>
+      </tr>)}</tbody></table></div>
+      <ListPagination page={page} total={total} onPageChange={setPage} />
+    </>}
   </SectionPanel>;
 }
 
@@ -930,11 +944,14 @@ type JobExportRow = JobCard & {
 
 function JobsSection({ query, onNew, onSelect, onNotice, can }: { query: string; onNew: () => void; onSelect: (id: string) => void; onNotice: (m: string) => void; can: (p: string) => boolean }) {
   const [jobs, setJobs] = useState<(JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [bucketFilter, setBucketFilter] = useState<string | null>(null);
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [exporting, setExporting] = useState(false);
+  const [page, setPage] = useState(0);
+  useEffect(() => { setPage(0); }, [query, statusFilter, bucketFilter]);
 
   async function exportWorkOrdersCSV() {
     setExporting(true);
@@ -983,14 +1000,14 @@ function JobsSection({ query, onNew, onSelect, onNotice, can }: { query: string;
   }, [jobs.length]);
   useEffect(() => {
     (async () => {
-      let q = supabase.from('job_cards').select('*, vehicles(registration_number), customers(full_name)').is('deleted_at', null).order('created_at', { ascending: false });
+      let q = supabase.from('job_cards').select('*, vehicles(registration_number), customers(full_name)', { count: 'exact' }).is('deleted_at', null).order('created_at', { ascending: false });
       if (bucketFilter) q = q.in('status', JOB_STATUS_BUCKETS.find((b) => b.key === bucketFilter)?.statuses ?? []);
       else if (statusFilter !== 'ALL') q = q.eq('status', statusFilter);
       if (query) q = q.or(`job_number.ilike.%${query}%,complaint.ilike.%${query}%`);
-      const { data } = await q.limit(100);
-      setJobs((data ?? []) as (JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[]); setLoading(false);
+      const { data, count } = await q.range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+      setJobs((data ?? []) as (JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[]); setTotal(count ?? 0); setLoading(false);
     })();
-  }, [query, statusFilter, bucketFilter]);
+  }, [query, statusFilter, bucketFilter, page]);
 
   return <SectionPanel eyebrow="Workshop execution" title="Work Orders" onNew={can('job.create') ? onNew : undefined} newLabel="New work order">
     <div className="action-buttons" style={{ marginBottom: 16 }}>
@@ -1003,18 +1020,21 @@ function JobsSection({ query, onNew, onSelect, onNotice, can }: { query: string;
       </button>;
     })}</div>
     <div className="filter-bar"><Filter size={15} /><select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setBucketFilter(null); }}><option value="ALL">All statuses</option>{Object.keys(JOB_TRANSITIONS).map((s) => <option key={s} value={s}>{s.replaceAll('_', ' ')}</option>)}</select>{bucketFilter && <button className="text-button" onClick={() => setBucketFilter(null)}>Clear filter</button>}</div>
-    {loading ? <Loading /> : jobs.length === 0 ? <Empty title="No active work orders" text="Create a work order when a vehicle arrives." /> : <div className="report-table-wrap"><table className="report-table"><thead><tr>
-      <th>Job Number</th><th>Date</th><th>Vehicle</th><th>Customer</th><th>Complaint</th><th>Priority</th><th>Status</th><th />
-    </tr></thead><tbody>{jobs.map((j) => <tr key={j.id} className="clickable" onClick={() => onSelect(j.id)}>
-      <td><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><div className="job-icon"><Wrench size={17} /></div><strong>{j.job_number}</strong></div></td>
-      <td>{formatDate(j.created_at)}</td>
-      <td>{j.vehicles?.registration_number ?? '—'}</td>
-      <td>{j.customers?.full_name ?? '—'}</td>
-      <td>{j.complaint}</td>
-      <td><span className={`status ${PRIORITY_STYLES[j.priority] ?? ''}`}>{j.priority}</span></td>
-      <td><span className={`status ${statusStyles[j.status] ?? ''}`}>{j.status.replaceAll('_', ' ')}</span></td>
-      <td><ChevronRight size={17} className="row-arrow" /></td>
-    </tr>)}</tbody></table></div>}
+    {loading ? <Loading /> : jobs.length === 0 ? <Empty title="No active work orders" text="Create a work order when a vehicle arrives." /> : <>
+      <div className="report-table-wrap"><table className="report-table"><thead><tr>
+        <th>Job Number</th><th>Date</th><th>Vehicle</th><th>Customer</th><th>Complaint</th><th>Priority</th><th>Status</th><th />
+      </tr></thead><tbody>{jobs.map((j) => <tr key={j.id} className="clickable" onClick={() => onSelect(j.id)}>
+        <td><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><div className="job-icon"><Wrench size={17} /></div><strong>{j.job_number}</strong></div></td>
+        <td>{formatDate(j.created_at)}</td>
+        <td>{j.vehicles?.registration_number ?? '—'}</td>
+        <td>{j.customers?.full_name ?? '—'}</td>
+        <td>{j.complaint}</td>
+        <td><span className={`status ${PRIORITY_STYLES[j.priority] ?? ''}`}>{j.priority}</span></td>
+        <td><span className={`status ${statusStyles[j.status] ?? ''}`}>{j.status.replaceAll('_', ' ')}</span></td>
+        <td><ChevronRight size={17} className="row-arrow" /></td>
+      </tr>)}</tbody></table></div>
+      <ListPagination page={page} total={total} onPageChange={setPage} />
+    </>}
   </SectionPanel>;
 }
 
@@ -1496,6 +1516,10 @@ function WorkOrderCopy({ job, labourTotal, partsTotal, taxRate, blank }: { job: 
     <div className="work-order-copy">
       <div className="wo-header">
         <div className="wo-brand">
+          {/* Plain <img>, not next/image: this renders inside a print/PDF sheet
+              (html-to-image + window.print), where next/image's lazy-loaded,
+              server-resized output doesn't reliably capture. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.png" alt="Oakland Motor Care Ltd" />
           <h1>WORK ORDER</h1>
         </div>
@@ -1689,15 +1713,26 @@ function partStockStatus(p: Part): { label: string; className: string } {
 
 function PartsSection({ onNew, onReceive, onAdjust, onSelect, can, onNotice }: { onNew: () => void; onReceive: () => void; onAdjust: () => void; onSelect: (id: string) => void; can: (p: string) => boolean; onNotice: (m: string) => void }) {
   const [parts, setParts] = useState<(Part & { suppliers: { name: string } | null })[]>([]);
+  const [total, setTotal] = useState(0);
   const [performance, setPerformance] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [page, setPage] = useState(0);
+  const [exporting, setExporting] = useState(false);
   const canBulkUpload = can('inventory.create') && can('inventory.update') && can('inventory.adjust');
+  useEffect(() => { setPage(0); }, [query]);
 
-  function exportPartsCSV() {
-    downloadCSV(`Oakland_Parts_${new Date().toISOString().slice(0, 10)}.csv`, parts.map((p) => ({
+  async function exportPartsCSV() {
+    setExporting(true);
+    let q = supabase.from('parts').select('*, suppliers(name)').eq('active', true).order('name');
+    if (query) q = q.or(`sku.ilike.%${query}%,name.ilike.%${query}%`);
+    const { data } = await q.limit(2000);
+    setExporting(false);
+    const rows = (data ?? []) as (Part & { suppliers: { name: string } | null })[];
+    if (rows.length === 0) { onNotice('There are no parts to export.'); return; }
+    downloadCSV(`Oakland_Parts_${new Date().toISOString().slice(0, 10)}.csv`, rows.map((p) => ({
       'Part/spare No': p.sku,
       'Description': p.name,
       'Vehicle model & part make': [p.vehicle_model, p.brand].filter(Boolean).join(' · '),
@@ -1711,12 +1746,12 @@ function PartsSection({ onNew, onReceive, onAdjust, onSelect, can, onNotice }: {
   }
   useEffect(() => {
     (async () => {
-      let q = supabase.from('parts').select('*, suppliers(name)').eq('active', true).order('name');
+      let q = supabase.from('parts').select('*, suppliers(name)', { count: 'exact' }).eq('active', true).order('name');
       if (query) q = q.or(`sku.ilike.%${query}%,name.ilike.%${query}%`);
-      const { data } = await q.limit(200);
-      setParts((data ?? []) as (Part & { suppliers: { name: string } | null })[]); setLoading(false);
+      const { data, count } = await q.range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+      setParts((data ?? []) as (Part & { suppliers: { name: string } | null })[]); setTotal(count ?? 0); setLoading(false);
     })();
-  }, [query, refreshKey]);
+  }, [query, refreshKey, page]);
   useEffect(() => {
     (async () => {
       const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -1731,7 +1766,7 @@ function PartsSection({ onNew, onReceive, onAdjust, onSelect, can, onNotice }: {
     <div className="action-buttons" style={{ marginBottom: 16 }}>
       {can('inventory.receive') && <button className="button secondary small" onClick={onReceive}><Plus size={15} /> Receive stock</button>}
       {can('inventory.adjust') && <button className="button secondary small" onClick={onAdjust}><Edit size={15} /> Adjust stock</button>}
-      <button className="button secondary small" disabled={parts.length === 0} onClick={exportPartsCSV}><Download size={15} /> Export CSV</button>
+      <button className="button secondary small" disabled={exporting} onClick={() => void exportPartsCSV()}><Download size={15} /> {exporting ? 'Exporting…' : 'Export CSV'}</button>
       {canBulkUpload && <button className="button secondary small" onClick={() => setShowBulkUpload(true)}><Upload size={15} /> Bulk upload</button>}
     </div>
     {showBulkUpload && <BulkPartsUploadDialog onClose={() => setShowBulkUpload(false)} onSaved={(m) => { onNotice(m); setRefreshKey((k) => k + 1); }} />}
@@ -1763,6 +1798,7 @@ function PartsSection({ onNew, onReceive, onAdjust, onSelect, can, onNotice }: {
           <div className="part-card-foot"><span>{p.quantity_on_hand} in stock · {p.suppliers?.name ?? 'No supplier'}</span>{sold > 0 && <span className="performance-tag up"><TrendingUp size={12} /> {sold} sold</span>}</div>
         </button>;
       })}</div>
+      <ListPagination page={page} total={total} onPageChange={setPage} />
     </>}
   </SectionPanel>;
 }
@@ -1860,46 +1896,72 @@ type StockMovementRow = StockMovement & { parts: { id: string; name: string; sku
 
 function StockMovementsSection({ onSelectPart, onNavigateToSale, onNavigateToJob, onNavigateToPO }: { onSelectPart: (id: string) => void; onNavigateToSale: (id: string) => void; onNavigateToJob: (id: string) => void; onNavigateToPO: (id: string) => void }) {
   const [movements, setMovements] = useState<StockMovementRow[]>([]);
+  const [total, setTotal] = useState(0);
   const [actorNames, setActorNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+  const [page, setPage] = useState(0);
+  const [exporting, setExporting] = useState(false);
+
+  useEffect(() => { setPage(0); }, [typeFilter, fromDate, toDate, query]);
 
   useEffect(() => {
     setLoading(true);
     const timer = setTimeout(async () => {
-      let q = supabase.from('stock_movements').select('*, parts!inner(id,name,sku)').order('created_at', { ascending: false }).limit(300);
+      let q = supabase.from('stock_movements').select('*, parts!inner(id,name,sku)', { count: 'exact' }).order('created_at', { ascending: false });
       if (typeFilter !== 'ALL') q = q.eq('movement_type', typeFilter);
       if (fromDate) q = q.gte('created_at', `${fromDate}T00:00:00`);
       if (toDate) q = q.lte('created_at', `${toDate}T23:59:59`);
       const term = query.trim();
       if (term) q = q.or(`name.ilike.%${term}%,sku.ilike.%${term}%`, { foreignTable: 'parts' });
-      const { data } = await q;
+      const { data, count } = await q.range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
       const rows = (data ?? []) as unknown as StockMovementRow[];
       setMovements(rows);
+      setTotal(count ?? 0);
       setLoading(false);
       const userIds = Array.from(new Set(rows.map((m) => m.user_id).filter(Boolean))) as string[];
       if (userIds.length > 0) {
         const { data: profileRows } = await supabase.from('profiles').select('id,full_name').in('id', userIds);
         const map: Record<string, string> = {};
         for (const row of (profileRows ?? []) as { id: string; full_name: string }[]) map[row.id] = row.full_name;
-        setActorNames(map);
+        setActorNames((prev) => ({ ...prev, ...map }));
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [typeFilter, fromDate, toDate, query]);
+  }, [typeFilter, fromDate, toDate, query, page]);
 
-  function exportCSV() {
-    downloadCSV(`Oakland_stock_movements_${new Date().toISOString().slice(0, 10)}.csv`, movements.map((m) => ({
+  async function exportCSV() {
+    setExporting(true);
+    let q = supabase.from('stock_movements').select('*, parts!inner(id,name,sku)').order('created_at', { ascending: false }).limit(3000);
+    if (typeFilter !== 'ALL') q = q.eq('movement_type', typeFilter);
+    if (fromDate) q = q.gte('created_at', `${fromDate}T00:00:00`);
+    if (toDate) q = q.lte('created_at', `${toDate}T23:59:59`);
+    const term = query.trim();
+    if (term) q = q.or(`name.ilike.%${term}%,sku.ilike.%${term}%`, { foreignTable: 'parts' });
+    const { data } = await q;
+    const rows = (data ?? []) as unknown as StockMovementRow[];
+    let names = actorNames;
+    const userIds = Array.from(new Set(rows.map((m) => m.user_id).filter(Boolean))) as string[];
+    const missing = userIds.filter((id) => !(id in names));
+    if (missing.length > 0) {
+      const { data: profileRows } = await supabase.from('profiles').select('id,full_name').in('id', missing);
+      const map: Record<string, string> = { ...names };
+      for (const row of (profileRows ?? []) as { id: string; full_name: string }[]) map[row.id] = row.full_name;
+      names = map;
+    }
+    setExporting(false);
+    if (rows.length === 0) return;
+    downloadCSV(`Oakland_stock_movements_${new Date().toISOString().slice(0, 10)}.csv`, rows.map((m) => ({
       Date: formatDateTime(m.created_at),
       Part: m.parts?.name ?? '',
       'Part Number': m.parts?.sku ?? '',
       Movement: MOVEMENT_LABELS[m.movement_type] ?? m.movement_type,
       Reference: m.reference ?? '',
       Reason: m.reason ?? '',
-      By: m.user_id ? actorNames[m.user_id] ?? '' : '',
+      By: m.user_id ? names[m.user_id] ?? '' : '',
       Quantity: m.quantity,
       'Previous Balance': m.previous_balance,
       'New Balance': m.new_balance,
@@ -1909,7 +1971,7 @@ function StockMovementsSection({ onSelectPart, onNavigateToSale, onNavigateToJob
   const hasFilters = query || typeFilter !== 'ALL' || fromDate || toDate;
 
   return <>
-    <div className="page-heading"><div><p className="eyebrow">Audit trail</p><h1>Stock Movements</h1><p className="muted">Every change to inventory, in one place.</p></div><div className="heading-actions"><button className="button secondary" onClick={exportCSV} disabled={movements.length === 0}><Download size={16} /> Export CSV</button></div></div>
+    <div className="page-heading"><div><p className="eyebrow">Audit trail</p><h1>Stock Movements</h1><p className="muted">Every change to inventory, in one place.</p></div><div className="heading-actions"><button className="button secondary" onClick={() => void exportCSV()} disabled={exporting}><Download size={16} /> {exporting ? 'Exporting…' : 'Export CSV'}</button></div></div>
     <div className="form-row modal-form" style={{ gridTemplateColumns: 'repeat(4, minmax(0,1fr))', alignItems: 'end', marginBottom: 12 }}>
       <label>Search part<input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Name or part number..." /></label>
       <label>Movement type<select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}><option value="ALL">All types</option>{MOVEMENT_TYPES.map((t) => <option key={t} value={t}>{MOVEMENT_LABELS[t] ?? t}</option>)}</select></label>
@@ -1918,7 +1980,7 @@ function StockMovementsSection({ onSelectPart, onNavigateToSale, onNavigateToJob
     </div>
     {hasFilters && <div className="action-buttons" style={{ marginBottom: 16 }}><button type="button" className="text-button" onClick={() => { setQuery(''); setTypeFilter('ALL'); setFromDate(''); setToDate(''); }}>Clear filters</button></div>}
     <section className="panel table-panel">
-      {loading ? <Loading /> : movements.length === 0 ? <Empty title="No stock movements" text="Try widening your filters." /> : <div className="report-table-wrap"><table className="report-table"><thead><tr>
+      {loading ? <Loading /> : movements.length === 0 ? <Empty title="No stock movements" text="Try widening your filters." /> : <><div className="report-table-wrap"><table className="report-table"><thead><tr>
         <th>Date</th><th>Part</th><th>Reference</th><th>Movement</th><th className="numeric">Qty</th><th className="numeric">Balance</th>
       </tr></thead><tbody>{movements.map((m) => {
         let navigate: ((id: string) => void) | undefined;
@@ -1936,7 +1998,9 @@ function StockMovementsSection({ onSelectPart, onNavigateToSale, onNavigateToJob
           <td className="numeric"><span className={`status ${m.quantity >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>{m.quantity >= 0 ? '+' : ''}{m.quantity}</span></td>
           <td className="numeric">{m.previous_balance} → {m.new_balance}</td>
         </tr>;
-      })}</tbody></table></div>}
+      })}</tbody></table></div>
+      <ListPagination page={page} total={total} onPageChange={setPage} />
+      </>}
     </section>
   </>;
 }
@@ -2105,6 +2169,7 @@ function SuggestedOrderPrintView({ orderQty, orderGroups, grandTotalMinor, onClo
     </div>
     <div id="print-area" className="print-sheet">
       <div className="print-header">
+        {/* eslint-disable-next-line @next/next/no-img-element -- print/PDF sheet; see WORK ORDER header for why */}
         <div><img src="/logo.png" alt="Oakland Motor Care Ltd" /><h1>Oakland Motor Care Ltd.</h1><p className="muted">Suggested Purchase Order</p><p className="muted">Generated {today}</p></div>
       </div>
       {orderGroups.map(([supplierName, items]) => {
@@ -2125,17 +2190,23 @@ function SuggestedOrderPrintView({ orderQty, orderGroups, grandTotalMinor, onClo
 // === SUPPLIERS ===
 function SuppliersSection({ query, onNew, onSelect, can }: { query: string; onNew: () => void; onSelect: (id: string) => void; can: (p: string) => boolean }) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(0);
+  useEffect(() => { setPage(0); }, [query]);
   useEffect(() => {
     (async () => {
-      let q = supabase.from('suppliers').select('*').is('deleted_at', null).order('name');
+      let q = supabase.from('suppliers').select('*', { count: 'exact' }).is('deleted_at', null).order('name');
       if (query) q = q.or(`name.ilike.%${query}%,phone.ilike.%${query}%`);
-      const { data } = await q.limit(100);
-      setSuppliers((data ?? []) as Supplier[]); setLoading(false);
+      const { data, count } = await q.range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+      setSuppliers((data ?? []) as Supplier[]); setTotal(count ?? 0); setLoading(false);
     })();
-  }, [query]);
+  }, [query, page]);
   return <SectionPanel eyebrow="Vendor directory" title="Suppliers" onNew={can('supplier.create') ? onNew : undefined} newLabel="Add supplier">
-    {loading ? <Loading /> : suppliers.length === 0 ? <Empty title="No suppliers" text="Add your first supplier." /> : <div className="data-table">{suppliers.map((s) => <div className="table-row clickable" key={s.id} onClick={() => onSelect(s.id)}><div className="job-icon"><Truck size={17} /></div><div><strong>{s.name}</strong><span>{s.contact_person ?? 'No contact'}</span></div><span className="table-muted">{s.phone}</span><span className={`status ${statusStyles[s.status] ?? ''}`}>{s.status}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
+    {loading ? <Loading /> : suppliers.length === 0 ? <Empty title="No suppliers" text="Add your first supplier." /> : <>
+      <div className="data-table">{suppliers.map((s) => <div className="table-row clickable" key={s.id} onClick={() => onSelect(s.id)}><div className="job-icon"><Truck size={17} /></div><div><strong>{s.name}</strong><span>{s.contact_person ?? 'No contact'}</span></div><span className="table-muted">{s.phone}</span><span className={`status ${statusStyles[s.status] ?? ''}`}>{s.status}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>
+      <ListPagination page={page} total={total} onPageChange={setPage} />
+    </>}
   </SectionPanel>;
 }
 
@@ -2179,10 +2250,15 @@ function SupplierDetail({ id, onBack, onNewPO, can, onNotice }: { id: string; on
 // === PROCUREMENT ===
 function ProcurementSection({ onNew, onSelect, can }: { onNew: () => void; onSelect: (id: string) => void; can: (p: string) => boolean }) {
   const [pos, setPOs] = useState<(PurchaseOrder & { suppliers: { name: string } | null })[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { supabase.from('purchase_orders').select('*, suppliers(name)').order('created_at', { ascending: false }).limit(100).then(({ data }) => { setPOs((data ?? []) as (PurchaseOrder & { suppliers: { name: string } | null })[]); setLoading(false); }); }, []);
+  const [page, setPage] = useState(0);
+  useEffect(() => { supabase.from('purchase_orders').select('*, suppliers(name)', { count: 'exact' }).order('created_at', { ascending: false }).range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1).then(({ data, count }) => { setPOs((data ?? []) as (PurchaseOrder & { suppliers: { name: string } | null })[]); setTotal(count ?? 0); setLoading(false); }); }, [page]);
   return <SectionPanel eyebrow="Purchase orders" title="Procurement" onNew={can('purchase_order.create') ? onNew : undefined} newLabel="New PO">
-    {loading ? <Loading /> : pos.length === 0 ? <Empty title="No purchase orders" text="Create your first purchase order." /> : <div className="data-table">{pos.map((p) => <div className="table-row clickable" key={p.id} onClick={() => onSelect(p.id)}><div className="job-icon"><ShoppingCart size={17} /></div><div><strong>{p.po_number}</strong><span>{p.suppliers?.name ?? 'Supplier'} · {formatDate(p.order_date)}</span></div><span className="table-muted">{formatKes(p.total_minor)}</span><span className={`status ${statusStyles[p.status] ?? ''}`}>{p.status.replaceAll('_', ' ')}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
+    {loading ? <Loading /> : pos.length === 0 ? <Empty title="No purchase orders" text="Create your first purchase order." /> : <>
+      <div className="data-table">{pos.map((p) => <div className="table-row clickable" key={p.id} onClick={() => onSelect(p.id)}><div className="job-icon"><ShoppingCart size={17} /></div><div><strong>{p.po_number}</strong><span>{p.suppliers?.name ?? 'Supplier'} · {formatDate(p.order_date)}</span></div><span className="table-muted">{formatKes(p.total_minor)}</span><span className={`status ${statusStyles[p.status] ?? ''}`}>{p.status.replaceAll('_', ' ')}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>
+      <ListPagination page={page} total={total} onPageChange={setPage} />
+    </>}
   </SectionPanel>;
 }
 
@@ -2201,8 +2277,8 @@ function PODetail({ id, onBack, can, onNotice }: { id: string; onBack: () => voi
   const [showPrint, setShowPrint] = useState(false);
   const [purging, setPurging] = useState(false);
 
-  async function reload() { const { data } = await supabase.from('purchase_orders').select('*, suppliers(*), purchase_order_items(*, parts(*))').eq('id', id).maybeSingle(); setPO(data as PODetailData | null); }
-  useEffect(() => { void reload(); }, [id]);
+  const reload = useCallback(async () => { const { data } = await supabase.from('purchase_orders').select('*, suppliers(*), purchase_order_items(*, parts(*))').eq('id', id).maybeSingle(); setPO(data as PODetailData | null); }, [id]);
+  useEffect(() => { void reload(); }, [reload]);
 
   async function purge() {
     if (!po || purging) return;
@@ -2316,6 +2392,7 @@ function POPrintView({ po, onClose }: { po: PODetailData; onClose: () => void })
     </div>
     <div id="print-area" className="print-sheet">
       <div className="print-header">
+        {/* eslint-disable-next-line @next/next/no-img-element -- print/PDF sheet; see WORK ORDER header for why */}
         <div><img src="/logo.png" alt="Oakland Motor Care Ltd" /><h1>Oakland Motor Care Ltd.</h1><p className="muted">Purchase Order</p></div>
         <div style={{ textAlign: 'right' }}>
           <p className="print-field"><span>PO Number</span><strong>{po.po_number}</strong></p>
@@ -2344,10 +2421,15 @@ function POPrintView({ po, onClose }: { po: PODetailData; onClose: () => void })
 // === QUOTATIONS ===
 function QuotationsSection({ onNew, onSelect, can }: { onNew: () => void; onSelect: (id: string) => void; can: (p: string) => boolean }) {
   const [quotes, setQuotes] = useState<(Quotation & { customers: { full_name: string } | null })[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { supabase.from('quotations').select('*, customers(full_name)').order('created_at', { ascending: false }).limit(100).then(({ data }) => { setQuotes((data ?? []) as (Quotation & { customers: { full_name: string } | null })[]); setLoading(false); }); }, []);
+  const [page, setPage] = useState(0);
+  useEffect(() => { supabase.from('quotations').select('*, customers(full_name)', { count: 'exact' }).order('created_at', { ascending: false }).range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1).then(({ data, count }) => { setQuotes((data ?? []) as (Quotation & { customers: { full_name: string } | null })[]); setTotal(count ?? 0); setLoading(false); }); }, [page]);
   return <SectionPanel eyebrow="Pricing" title="Quotations" onNew={can('quotation.create') ? onNew : undefined} newLabel="New quotation">
-    {loading ? <Loading /> : quotes.length === 0 ? <Empty title="No quotations" text="Create a quotation from a work order." /> : <div className="data-table">{quotes.map((q) => <div className="table-row clickable" key={q.id} onClick={() => onSelect(q.id)}><div className="job-icon"><FileText size={17} /></div><div><strong>{q.quote_number}</strong><span>{q.customers?.full_name ?? 'Customer'}</span></div><span className="table-muted">{formatKes(q.total_minor)}</span><span className={`status ${statusStyles[q.status] ?? ''}`}>{q.status.replaceAll('_', ' ')}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
+    {loading ? <Loading /> : quotes.length === 0 ? <Empty title="No quotations" text="Create a quotation from a work order." /> : <>
+      <div className="data-table">{quotes.map((q) => <div className="table-row clickable" key={q.id} onClick={() => onSelect(q.id)}><div className="job-icon"><FileText size={17} /></div><div><strong>{q.quote_number}</strong><span>{q.customers?.full_name ?? 'Customer'}</span></div><span className="table-muted">{formatKes(q.total_minor)}</span><span className={`status ${statusStyles[q.status] ?? ''}`}>{q.status.replaceAll('_', ' ')}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>
+      <ListPagination page={page} total={total} onPageChange={setPage} />
+    </>}
   </SectionPanel>;
 }
 
@@ -2411,17 +2493,23 @@ function QuotationDetail({ id, onBack, can, onNotice }: { id: string; onBack: ()
 // === INVOICES ===
 function InvoicesSection({ query, onNew, onSelect, can }: { query: string; onNew: () => void; onSelect: (id: string) => void; can: (p: string) => boolean }) {
   const [invoices, setInvoices] = useState<(Invoice & { customers: { full_name: string } | null })[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(0);
+  useEffect(() => { setPage(0); }, [query]);
   useEffect(() => {
     (async () => {
-      let q = supabase.from('invoices').select('*, customers(full_name)').order('created_at', { ascending: false });
+      let q = supabase.from('invoices').select('*, customers(full_name)', { count: 'exact' }).order('created_at', { ascending: false });
       if (query) q = q.or(`invoice_number.ilike.%${query}%`);
-      const { data } = await q.limit(100);
-      setInvoices((data ?? []) as (Invoice & { customers: { full_name: string } | null })[]); setLoading(false);
+      const { data, count } = await q.range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+      setInvoices((data ?? []) as (Invoice & { customers: { full_name: string } | null })[]); setTotal(count ?? 0); setLoading(false);
     })();
-  }, [query]);
+  }, [query, page]);
   return <SectionPanel eyebrow="Billing" title="Invoices" onNew={can('invoice.create') ? onNew : undefined} newLabel="New invoice">
-    {loading ? <Loading /> : invoices.length === 0 ? <Empty title="No invoices" text="Create an invoice from a work order or quotation." /> : <div className="data-table">{invoices.map((inv) => <div className="table-row clickable" key={inv.id} onClick={() => onSelect(inv.id)}><div className="job-icon"><CircleDollarSign size={17} /></div><div><strong>{inv.invoice_number}</strong><span>{inv.customers?.full_name ?? 'Customer'}</span></div><span className="table-muted">{formatKes(inv.total_minor)}</span><span className="table-muted">{formatKes(inv.amount_paid_minor)} paid</span><span className={`status ${statusStyles[inv.status] ?? ''}`}>{inv.status.replaceAll('_', ' ')}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
+    {loading ? <Loading /> : invoices.length === 0 ? <Empty title="No invoices" text="Create an invoice from a work order or quotation." /> : <>
+      <div className="data-table">{invoices.map((inv) => <div className="table-row clickable" key={inv.id} onClick={() => onSelect(inv.id)}><div className="job-icon"><CircleDollarSign size={17} /></div><div><strong>{inv.invoice_number}</strong><span>{inv.customers?.full_name ?? 'Customer'}</span></div><span className="table-muted">{formatKes(inv.total_minor)}</span><span className="table-muted">{formatKes(inv.amount_paid_minor)} paid</span><span className={`status ${statusStyles[inv.status] ?? ''}`}>{inv.status.replaceAll('_', ' ')}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>
+      <ListPagination page={page} total={total} onPageChange={setPage} />
+    </>}
   </SectionPanel>;
 }
 
@@ -2460,10 +2548,12 @@ type PaymentWithDetail = Payment & { invoices: { invoice_number: string; custome
 
 function PaymentsSection({ onNotice }: { onNotice: (m: string) => void }) {
   const [payments, setPayments] = useState<PaymentWithDetail[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<PaymentWithDetail | null>(null);
   const [exporting, setExporting] = useState(false);
-  useEffect(() => { supabase.from('payments').select('*, invoices(invoice_number, customers(full_name), job_cards(job_number))').order('paid_at', { ascending: false }).limit(100).then(({ data }) => { setPayments((data ?? []) as PaymentWithDetail[]); setLoading(false); }); }, []);
+  const [page, setPage] = useState(0);
+  useEffect(() => { supabase.from('payments').select('*, invoices(invoice_number, customers(full_name), job_cards(job_number))', { count: 'exact' }).order('paid_at', { ascending: false }).range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1).then(({ data, count }) => { setPayments((data ?? []) as PaymentWithDetail[]); setTotal(count ?? 0); setLoading(false); }); }, [page]);
 
   async function exportCSV() {
     setExporting(true);
@@ -2485,7 +2575,10 @@ function PaymentsSection({ onNotice }: { onNotice: (m: string) => void }) {
   }
 
   return <SectionPanel eyebrow="Transaction log" title="Payments" extra={<button className="button secondary small" disabled={exporting} onClick={() => void exportCSV()}><Download size={15} /> {exporting ? 'Exporting…' : 'Export CSV'}</button>}>
-    {loading ? <Loading /> : payments.length === 0 ? <Empty title="No payments recorded" text="Payments will appear here once invoices are paid." /> : <div className="data-table">{payments.map((p) => <div className="table-row clickable" key={p.id} onClick={() => setSelected(p)}><div className="job-icon"><Banknote size={17} /></div><div><strong>{formatKes(p.amount_minor)}</strong><span>{p.invoices?.invoice_number ?? 'Invoice'} · Work Order {p.invoices?.job_cards?.job_number ?? '—'} · {p.method}</span></div><span className="table-muted">{formatDate(p.paid_at)}</span><span className="table-muted">{p.reference ?? '—'}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
+    {loading ? <Loading /> : payments.length === 0 ? <Empty title="No payments recorded" text="Payments will appear here once invoices are paid." /> : <>
+      <div className="data-table">{payments.map((p) => <div className="table-row clickable" key={p.id} onClick={() => setSelected(p)}><div className="job-icon"><Banknote size={17} /></div><div><strong>{formatKes(p.amount_minor)}</strong><span>{p.invoices?.invoice_number ?? 'Invoice'} · Work Order {p.invoices?.job_cards?.job_number ?? '—'} · {p.method}</span></div><span className="table-muted">{formatDate(p.paid_at)}</span><span className="table-muted">{p.reference ?? '—'}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>
+      <ListPagination page={page} total={total} onPageChange={setPage} />
+    </>}
     {selected && <PaymentDetailModal payment={selected} onClose={() => setSelected(null)} />}
   </SectionPanel>;
 }
@@ -2511,17 +2604,21 @@ type ReceiptPayment = Payment & { invoices: { invoice_number: string; total_mino
 
 function ReceiptsSection({ onNotice, can }: { onNotice: (m: string) => void; can: (p: string) => boolean }) {
   const [payments, setPayments] = useState<ReceiptPayment[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<ReceiptPayment | null>(null);
   const [exporting, setExporting] = useState(false);
-  useEffect(() => { supabase.from('payments').select('*, invoices(invoice_number, total_minor, amount_paid_minor, customers(full_name), job_cards(job_number))').order('paid_at', { ascending: false }).limit(50).then(({ data }) => { setPayments((data ?? []) as ReceiptPayment[]); setLoading(false); }); }, []);
+  const [page, setPage] = useState(0);
+  useEffect(() => { supabase.from('payments').select('*, invoices(invoice_number, total_minor, amount_paid_minor, customers(full_name), job_cards(job_number))', { count: 'exact' }).order('paid_at', { ascending: false }).range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1).then(({ data, count }) => { setPayments((data ?? []) as ReceiptPayment[]); setTotal(count ?? 0); setLoading(false); }); }, [page]);
 
   const [generalReceipts, setGeneralReceipts] = useState<GeneralReceipt[]>([]);
+  const [generalTotal, setGeneralTotal] = useState(0);
   const [generalLoading, setGeneralLoading] = useState(true);
   const [generalRefreshKey, setGeneralRefreshKey] = useState(0);
   const [showGeneralForm, setShowGeneralForm] = useState(false);
   const [selectedGeneral, setSelectedGeneral] = useState<GeneralReceipt | null>(null);
-  useEffect(() => { supabase.from('general_receipts').select('*').order('receipt_date', { ascending: false }).limit(50).then(({ data }) => { setGeneralReceipts((data ?? []) as GeneralReceipt[]); setGeneralLoading(false); }); }, [generalRefreshKey]);
+  const [generalPage, setGeneralPage] = useState(0);
+  useEffect(() => { supabase.from('general_receipts').select('*', { count: 'exact' }).order('receipt_date', { ascending: false }).range(generalPage * PAGE_SIZE, generalPage * PAGE_SIZE + PAGE_SIZE - 1).then(({ data, count }) => { setGeneralReceipts((data ?? []) as GeneralReceipt[]); setGeneralTotal(count ?? 0); setGeneralLoading(false); }); }, [generalRefreshKey, generalPage]);
 
   async function exportCSV() {
     setExporting(true);
@@ -2545,7 +2642,10 @@ function ReceiptsSection({ onNotice, can }: { onNotice: (m: string) => void; can
 
   return <>
     <SectionPanel eyebrow="Proof of payment" title="Receipts" extra={<button className="button secondary small" disabled={exporting} onClick={() => void exportCSV()}><Download size={15} /> {exporting ? 'Exporting…' : 'Export CSV'}</button>}>
-      {loading ? <Loading /> : payments.length === 0 ? <Empty title="No receipts" text="Receipts are generated when payments are recorded." /> : <div className="data-table">{payments.map((p) => <div className="table-row clickable" key={p.id} onClick={() => setSelected(p)}><div className="job-icon"><Receipt size={17} /></div><div><strong>RCP-{p.id.slice(-6).toUpperCase()}</strong><span>{p.invoices?.customers?.full_name ?? 'Customer'} · {p.invoices?.invoice_number ?? 'Invoice'} · Work Order {p.invoices?.job_cards?.job_number ?? '—'}</span></div><span className="table-muted">{formatKes(p.amount_minor)}</span><span className="status bg-emerald-50 text-emerald-700">{p.method}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
+      {loading ? <Loading /> : payments.length === 0 ? <Empty title="No receipts" text="Receipts are generated when payments are recorded." /> : <>
+        <div className="data-table">{payments.map((p) => <div className="table-row clickable" key={p.id} onClick={() => setSelected(p)}><div className="job-icon"><Receipt size={17} /></div><div><strong>RCP-{p.id.slice(-6).toUpperCase()}</strong><span>{p.invoices?.customers?.full_name ?? 'Customer'} · {p.invoices?.invoice_number ?? 'Invoice'} · Work Order {p.invoices?.job_cards?.job_number ?? '—'}</span></div><span className="table-muted">{formatKes(p.amount_minor)}</span><span className="status bg-emerald-50 text-emerald-700">{p.method}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>
+        <ListPagination page={page} total={total} onPageChange={setPage} />
+      </>}
     </SectionPanel>
 
     <section className="panel table-panel" style={{ marginTop: 24 }}>
@@ -2553,7 +2653,10 @@ function ReceiptsSection({ onNotice, can }: { onNotice: (m: string) => void; can
         <div><p className="eyebrow">Not tied to a vehicle or work order</p><h3>General Receipts</h3></div>
         {can('payment.create') && <button className="button primary small" onClick={() => setShowGeneralForm(true)}><Plus size={16} /> Create Receipt</button>}
       </div>
-      {generalLoading ? <Loading /> : generalReceipts.length === 0 ? <Empty title="No general receipts" text="Create a receipt for work that isn't tied to a vehicle, e.g. welding a door for a company." /> : <div className="data-table">{generalReceipts.map((r) => <div className="table-row clickable" key={r.id} onClick={() => setSelectedGeneral(r)}><div className="job-icon"><Receipt size={17} /></div><div><strong>{r.receipt_number}</strong><span>{r.client_name}</span></div><span className="table-muted">{formatDate(r.receipt_date)}</span><span className="table-muted">{formatKes(r.total_minor)}</span><span className="status bg-emerald-50 text-emerald-700">{r.payment_method}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>}
+      {generalLoading ? <Loading /> : generalReceipts.length === 0 ? <Empty title="No general receipts" text="Create a receipt for work that isn't tied to a vehicle, e.g. welding a door for a company." /> : <>
+        <div className="data-table">{generalReceipts.map((r) => <div className="table-row clickable" key={r.id} onClick={() => setSelectedGeneral(r)}><div className="job-icon"><Receipt size={17} /></div><div><strong>{r.receipt_number}</strong><span>{r.client_name}</span></div><span className="table-muted">{formatDate(r.receipt_date)}</span><span className="table-muted">{formatKes(r.total_minor)}</span><span className="status bg-emerald-50 text-emerald-700">{r.payment_method}</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>
+        <ListPagination page={generalPage} total={generalTotal} onPageChange={setGeneralPage} />
+      </>}
     </section>
 
     {selected && <PaymentDetailModal payment={selected} onClose={() => setSelected(null)} />}
@@ -2689,6 +2792,7 @@ function GeneralReceiptPrintView({ receipt, onClose, onNotice }: { receipt: Gene
     </div>
     <div id="print-area" className="print-sheet">
       <div className="print-header">
+        {/* eslint-disable-next-line @next/next/no-img-element -- print/PDF sheet; see WORK ORDER header for why */}
         <div><img src="/logo.png" alt="Oakland Motor Care Ltd" /><h1>Oakland Motor Care Ltd.</h1><p className="muted">Receipt</p></div>
         <div style={{ textAlign: 'right' }}>
           <p className="print-field"><span>Receipt No</span><strong style={{ fontSize: 18 }}>{receipt.receipt_number}</strong></p>
@@ -2950,39 +3054,76 @@ type OverdueInvoiceRow = Invoice & { customers: { full_name: string } | null };
 
 function NotificationsSection({ onRefresh, can, onSelectInvoice }: { onRefresh: () => void; can: (p: string) => boolean; onSelectInvoice: (id: string) => void }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [total, setTotal] = useState(0);
+  const [unreadTotal, setUnreadTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(0);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [markingAll, setMarkingAll] = useState(false);
   const [overdueInvoices, setOverdueInvoices] = useState<OverdueInvoiceRow[]>([]);
+  const [overdueTotal, setOverdueTotal] = useState(0);
   const [overdueLoading, setOverdueLoading] = useState(true);
+  const [overduePage, setOverduePage] = useState(0);
 
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) { const { data } = await supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(50); setNotifications((data ?? []) as Notification[]); }
+      if (user) {
+        const [{ data, count }, { count: unread }] = await Promise.all([
+          supabase.from('notifications').select('*', { count: 'exact' }).eq('user_id', user.id).order('created_at', { ascending: false }).range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1),
+          supabase.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', user.id).is('read_at', null),
+        ]);
+        setNotifications((data ?? []) as Notification[]); setTotal(count ?? 0); setUnreadTotal(unread ?? 0);
+      }
       setLoading(false);
     })();
-  }, []);
+  }, [page, refreshKey]);
 
   useEffect(() => {
     if (!can('invoice.view')) { setOverdueLoading(false); return; }
-    supabase.from('invoices').select('*, customers(full_name)').lt('due_date', localDateStr()).not('status', 'in', '(PAID,VOID)').order('due_date').limit(100).then(({ data }) => {
+    supabase.from('invoices').select('*, customers(full_name)', { count: 'exact' }).lt('due_date', localDateStr()).not('status', 'in', '(PAID,VOID)').order('due_date').range(overduePage * PAGE_SIZE, overduePage * PAGE_SIZE + PAGE_SIZE - 1).then(({ data, count }) => {
       const rows = ((data ?? []) as OverdueInvoiceRow[]).filter((inv) => inv.amount_paid_minor < inv.total_minor);
-      setOverdueInvoices(rows); setOverdueLoading(false);
+      setOverdueInvoices(rows); setOverdueTotal(count ?? 0); setOverdueLoading(false);
     });
-  }, [can]);
+  }, [can, overduePage]);
 
   async function markRead(id: string) {
     await supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', id);
-    setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read_at: new Date().toISOString() } : n));
+    setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read_at: n.read_at ?? new Date().toISOString() } : n));
+    setUnreadTotal((n) => Math.max(0, n - 1));
+    onRefresh();
+  }
+
+  async function markAllRead() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || markingAll) return;
+    setMarkingAll(true);
+    await supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('user_id', user.id).is('read_at', null);
+    setMarkingAll(false);
+    setRefreshKey((k) => k + 1);
     onRefresh();
   }
 
   return <>
     {can('invoice.view') && !overdueLoading && overdueInvoices.length > 0 && <section className="panel table-panel" style={{ marginBottom: 24 }}>
-      <div className="panel-heading"><div><p className="eyebrow">Not stored — computed live</p><h3>Overdue Invoices ({overdueInvoices.length})</h3></div></div>
+      <div className="panel-heading"><div><p className="eyebrow">Not stored — computed live</p><h3>Overdue Invoices ({overdueTotal})</h3></div></div>
       <div className="data-table">{overdueInvoices.map((inv) => <div className="table-row clickable" key={inv.id} onClick={() => onSelectInvoice(inv.id)}><div className="job-icon"><AlertTriangle size={17} /></div><div><strong>{inv.invoice_number}</strong><span>{inv.customers?.full_name ?? 'Customer'} · Due {formatDate(inv.due_date)}</span></div><span className="table-muted">{formatKes(inv.total_minor - inv.amount_paid_minor)} outstanding</span><span className="status bg-red-50 text-red-700">OVERDUE</span><ChevronRight size={17} className="row-arrow" /></div>)}</div>
+      <ListPagination page={overduePage} total={overdueTotal} onPageChange={setOverduePage} />
     </section>}
-    <SectionPanel eyebrow="Alerts" title={notifications.filter((n) => !n.read_at).length > 0 ? `Notifications (${notifications.filter((n) => !n.read_at).length} unread)` : 'Notifications'}>
-      {loading ? <Loading /> : notifications.length === 0 ? <Empty title="No notifications" text="You're all caught up." /> : <div className="data-table">{notifications.map((n) => <div className={`table-row ${n.read_at ? 'read' : 'unread'}`} key={n.id} onClick={() => { if (!n.read_at) void markRead(n.id); }}><div className="job-icon"><Bell size={17} /></div><div><strong>{n.title}</strong><span>{n.message}</span></div><span className="table-muted">{formatDateTime(n.created_at)}</span>{!n.read_at && <span className="status bg-blue-50 text-blue-700">New</span>}</div>)}</div>}
+    <SectionPanel
+      eyebrow="Alerts"
+      title={unreadTotal > 0 ? `Notifications (${unreadTotal} unread)` : 'Notifications'}
+      extra={unreadTotal > 0 ? <button className="button secondary small" disabled={markingAll} onClick={() => void markAllRead()}><CheckCircle2 size={15} /> {markingAll ? 'Marking…' : 'Mark all as read'}</button> : undefined}
+    >
+      {loading ? <Loading /> : notifications.length === 0 ? <Empty title="No notifications" text="You're all caught up." /> : <>
+        <div className="data-table">{notifications.map((n) => <div className={`table-row ${n.read_at ? 'read' : 'unread'}`} key={n.id}>
+          <div className="job-icon"><Bell size={17} /></div>
+          <div><strong>{n.title}</strong><span>{n.message}</span></div>
+          <span className="table-muted">{formatDateTime(n.created_at)}</span>
+          {!n.read_at ? <button type="button" className="button secondary small" onClick={() => void markRead(n.id)}><CheckCircle2 size={13} /> Mark as read</button> : <span className="status bg-slate-100 text-slate-600">Read</span>}
+        </div>)}</div>
+        <ListPagination page={page} total={total} onPageChange={setPage} />
+      </>}
     </SectionPanel>
   </>;
 }
@@ -2990,10 +3131,15 @@ function NotificationsSection({ onRefresh, can, onSelectInvoice }: { onRefresh: 
 // === AUDIT ===
 function AuditSection() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(100).then(({ data }) => { setLogs((data ?? []) as AuditLog[]); setLoading(false); }); }, []);
+  const [page, setPage] = useState(0);
+  useEffect(() => { supabase.from('audit_logs').select('*', { count: 'exact' }).order('created_at', { ascending: false }).range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1).then(({ data, count }) => { setLogs((data ?? []) as AuditLog[]); setTotal(count ?? 0); setLoading(false); }); }, [page]);
   return <SectionPanel eyebrow="Traceability" title="Audit Logs">
-    {loading ? <Loading /> : logs.length === 0 ? <Empty title="No audit entries" text="Important changes will be logged here." /> : <div className="data-table">{logs.map((l) => <div className="table-row" key={l.id}><div className="job-icon"><ScrollText size={17} /></div><div><strong>{l.action.replaceAll('_', ' ')}</strong><span>{l.entity} · {formatDateTime(l.created_at)}</span></div><span className="table-muted">{l.entity_id?.slice(0, 8) ?? '—'}</span></div>)}</div>}
+    {loading ? <Loading /> : logs.length === 0 ? <Empty title="No audit entries" text="Important changes will be logged here." /> : <>
+      <div className="data-table">{logs.map((l) => <div className="table-row" key={l.id}><div className="job-icon"><ScrollText size={17} /></div><div><strong>{l.action.replaceAll('_', ' ')}</strong><span>{l.entity} · {formatDateTime(l.created_at)}</span></div><span className="table-muted">{l.entity_id?.slice(0, 8) ?? '—'}</span></div>)}</div>
+      <ListPagination page={page} total={total} onPageChange={setPage} />
+    </>}
   </SectionPanel>;
 }
 
@@ -3157,7 +3303,7 @@ function UsersSection({ onNotice }: { onNotice: (m: string) => void }) {
   const [roleFilter, setRoleFilter] = useState('ALL');
   useEffect(() => { supabase.auth.getUser().then(({ data }) => setSelfId(data.user?.id ?? null)); }, []);
 
-  async function loadAll() {
+  const loadAll = useCallback(async () => {
     const [r, p, rp, s] = await Promise.all([
       supabase.from('roles').select('*').order('name'),
       supabase.from('permissions').select('*').order('key'),
@@ -3171,8 +3317,8 @@ function UsersSection({ onNotice }: { onNotice: (m: string) => void }) {
     if (s.error) onNotice(s.error.message || 'Could not load the staff directory.');
     setStaff((s.data ?? []) as StaffRow[]);
     setLoading(false);
-  }
-  useEffect(() => { void loadAll(); }, []);
+  }, [onNotice]);
+  useEffect(() => { void loadAll(); }, [loadAll]);
 
   async function togglePerm(roleId: string, permKey: string) {
     const has = rolePerms[roleId]?.includes(permKey);

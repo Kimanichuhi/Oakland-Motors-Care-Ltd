@@ -6,11 +6,14 @@ import { formatKes, formatKg, formatDate } from '@/lib/formatting';
 import { byScrapTypeOrder } from '@/lib/constants';
 import { Search, ChevronRight, Calendar, Printer, Download } from 'lucide-react';
 import ScrapDailyDetail from './ScrapDailyDetail';
+import ListPagination, { PAGE_SIZE } from '@/components/ui/ListPagination';
 
 export default function ScrapRecordsHistory({ can, onNotice, onRefresh, refreshKey }: {
   can: (p: string) => boolean; onNotice: (m: string) => void; onRefresh: () => void; refreshKey: number;
 }) {
   const [days, setDays] = useState<ScrapCashSummary[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [fromDate, setFromDate] = useState('');
@@ -23,21 +26,24 @@ export default function ScrapRecordsHistory({ can, onNotice, onRefresh, refreshK
 
   useEffect(() => { supabase.from('scrap_items').select('*').order('name').then(({ data }) => setItems(((data ?? []) as ScrapItem[]).sort(byScrapTypeOrder))); }, []);
 
+  useEffect(() => { setPage(0); }, [fromDate, toDate, sortDir]);
+
   useEffect(() => {
     let mounted = true;
     async function load() {
       setLoading(true);
-      let q = supabase.from('scrap_cash_summary').select('*').order('date', { ascending: sortDir === 'asc' }).limit(365);
+      let q = supabase.from('scrap_cash_summary').select('*', { count: 'exact' }).order('date', { ascending: sortDir === 'asc' });
       if (fromDate) q = q.gte('date', fromDate);
       if (toDate) q = q.lte('date', toDate);
-      const { data } = await q;
+      const { data, count } = await q.range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
       if (!mounted) return;
       setDays((data ?? []) as ScrapCashSummary[]);
+      setTotal(count ?? 0);
       setLoading(false);
     }
     void load();
     return () => { mounted = false; };
-  }, [fromDate, toDate, sortDir, refreshKey]);
+  }, [fromDate, toDate, sortDir, page, refreshKey]);
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -79,7 +85,9 @@ export default function ScrapRecordsHistory({ can, onNotice, onRefresh, refreshK
               <ChevronRight size={16} className="row-arrow" />
             </div>
           ))}
-        </div></div>
+        </div>
+        <ListPagination page={page} total={total} onPageChange={setPage} />
+        </div>
       )}
 
       {showPrint && <ScrapRecordsPrintView fromDate={fromDate} toDate={toDate} scrapItemId={scrapItemId} scrapItemName={items.find((i) => i.id === scrapItemId)?.name ?? null} onClose={() => setShowPrint(false)} onNotice={onNotice} />}

@@ -2,34 +2,39 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { DebtRecord } from '@/lib/types';
 import { formatKes } from '@/lib/formatting';
-import { AlertTriangle, Users, Wrench, ClipboardList, ChevronRight } from 'lucide-react';
+import { AlertTriangle, Users, Wrench, ClipboardList, ShoppingBag, ChevronRight } from 'lucide-react';
 import { fetchJobCardDebts, type JobCardDebtRow } from './jobCardDebt';
+import { fetchSalesDebts, type SalesDebtRow } from './salesDebt';
 
-type PersonTotal = { name: string; source: 'Manual' | 'Work Order'; amount_minor: number; count: number };
+type PersonTotal = { name: string; source: 'Manual' | 'Work Order' | 'Credit Sale'; amount_minor: number; count: number };
 
 export default function DebtsOverviewPage({ onNavigateToRegister, onNavigateToReports }: { onNavigateToRegister: () => void; onNavigateToReports: () => void }) {
   const [debts, setDebts] = useState<DebtRecord[]>([]);
   const [jobDebts, setJobDebts] = useState<JobCardDebtRow[]>([]);
+  const [saleDebts, setSaleDebts] = useState<SalesDebtRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const [{ data: debtRows }, jobRows] = await Promise.all([
+      const [{ data: debtRows }, jobRows, saleRows] = await Promise.all([
         supabase.from('debt_records').select('*').neq('status', 'WRITTEN_OFF').order('incurred_date', { ascending: false }).limit(500),
         fetchJobCardDebts(),
+        fetchSalesDebts(),
       ]);
       setDebts((debtRows ?? []) as DebtRecord[]);
       setJobDebts(jobRows);
+      setSaleDebts(saleRows);
       setLoading(false);
     })();
   }, []);
 
   const manualOutstanding = debts.reduce((s, d) => s + (d.amount_minor - d.amount_recovered_minor), 0);
   const jobCardOutstanding = jobDebts.reduce((s, j) => s + j.balance_minor, 0);
-  const totalOutstanding = manualOutstanding + jobCardOutstanding;
+  const salesOutstanding = saleDebts.reduce((s, sd) => s + sd.balance_minor, 0);
+  const totalOutstanding = manualOutstanding + jobCardOutstanding + salesOutstanding;
   const staffLiability = debts.filter((d) => d.debt_type === 'STAFF').reduce((s, d) => s + (d.amount_minor - d.amount_recovered_minor), 0);
-  const customerDebt = debts.filter((d) => d.debt_type === 'CUSTOMER').reduce((s, d) => s + (d.amount_minor - d.amount_recovered_minor), 0) + jobCardOutstanding;
+  const customerDebt = debts.filter((d) => d.debt_type === 'CUSTOMER').reduce((s, d) => s + (d.amount_minor - d.amount_recovered_minor), 0) + jobCardOutstanding + salesOutstanding;
 
   const personMap = new Map<string, PersonTotal>();
   for (const d of debts) {
@@ -47,6 +52,14 @@ export default function DebtsOverviewPage({ onNavigateToRegister, onNavigateToRe
     cur.count += 1;
     personMap.set(key, cur);
   }
+  for (const sd of saleDebts) {
+    const name = sd.customer_name ?? 'Walk-in customer';
+    const key = `S:${name}`;
+    const cur = personMap.get(key) ?? { name, source: 'Credit Sale', amount_minor: 0, count: 0 };
+    cur.amount_minor += sd.balance_minor;
+    cur.count += 1;
+    personMap.set(key, cur);
+  }
   const topDebtors = Array.from(personMap.values()).sort((a, b) => b.amount_minor - a.amount_minor).slice(0, 6);
 
   if (loading) return <div className="empty"><strong>Loading...</strong></div>;
@@ -56,10 +69,11 @@ export default function DebtsOverviewPage({ onNavigateToRegister, onNavigateToRe
       <div><p className="eyebrow">Accountability</p><h1>Debts Overview</h1><p className="muted">Combined view of customer debt and staff liability across the whole business.</p></div>
     </div>
     <div className="metric-grid" style={{ marginBottom: 20 }}>
-      <div className="metric-card"><div className="metric-icon red"><AlertTriangle size={18} /></div><div className="metric-copy"><span>Total Owed to the Business</span><strong>{formatKes(totalOutstanding)}</strong><small>Debt register + open work order balances</small></div></div>
-      <div className="metric-card"><div className="metric-icon gold"><Users size={18} /></div><div className="metric-copy"><span>Customer Debt</span><strong>{formatKes(customerDebt)}</strong><small>Unpaid work + recorded customer debt</small></div></div>
+      <div className="metric-card"><div className="metric-icon red"><AlertTriangle size={18} /></div><div className="metric-copy"><span>Total Owed to the Business</span><strong>{formatKes(totalOutstanding)}</strong><small>Debt register + open work orders + credit sales</small></div></div>
+      <div className="metric-card"><div className="metric-icon gold"><Users size={18} /></div><div className="metric-copy"><span>Customer Debt</span><strong>{formatKes(customerDebt)}</strong><small>Unpaid work + credit sales + recorded customer debt</small></div></div>
       <div className="metric-card"><div className="metric-icon blue"><Wrench size={18} /></div><div className="metric-copy"><span>Staff Liability</span><strong>{formatKes(staffLiability)}</strong><small>Owed directly by staff</small></div></div>
       <div className="metric-card"><div className="metric-icon navy"><ClipboardList size={18} /></div><div className="metric-copy"><span>Work Orders with Debt</span><strong>{jobDebts.length}</strong><small>{formatKes(jobCardOutstanding)} outstanding</small></div></div>
+      <div className="metric-card"><div className="metric-icon gold"><ShoppingBag size={18} /></div><div className="metric-copy"><span>Credit Sales</span><strong>{saleDebts.length}</strong><small>{formatKes(salesOutstanding)} outstanding</small></div></div>
     </div>
     <div className="dashboard-grid">
       <section className="panel">
@@ -67,7 +81,7 @@ export default function DebtsOverviewPage({ onNavigateToRegister, onNavigateToRe
         {topDebtors.length === 0 ? <div className="empty"><strong>Nothing outstanding</strong><span>No debt recorded against anyone right now.</span></div> : <div className="data-table">
           {topDebtors.map((p) => <div className="row" key={p.source + p.name} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 0', borderTop: '1px solid #eef1f3' }}>
             <div className="job-icon"><Users size={15} /></div>
-            <div style={{ flex: 1 }}><strong style={{ display: 'block', fontSize: 12 }}>{p.name}</strong><span style={{ display: 'block', fontSize: 10, color: '#82909c', marginTop: 2 }}>{p.count} {p.source === 'Manual' ? 'recorded debt' : 'work order'}{p.count === 1 ? '' : 's'}</span></div>
+            <div style={{ flex: 1 }}><strong style={{ display: 'block', fontSize: 12 }}>{p.name}</strong><span style={{ display: 'block', fontSize: 10, color: '#82909c', marginTop: 2 }}>{p.count} {p.source === 'Manual' ? 'recorded debt' : p.source === 'Work Order' ? 'work order' : 'credit sale'}{p.count === 1 ? '' : 's'}</span></div>
             <strong style={{ fontSize: 12, color: '#a4493d' }}>{formatKes(p.amount_minor)}</strong>
           </div>)}
         </div>}

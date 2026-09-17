@@ -4,6 +4,9 @@ import type { DebtRecord, Employee } from '@/lib/types';
 import { formatKes, formatDate } from '@/lib/formatting';
 import { Plus, AlertTriangle, Edit } from 'lucide-react';
 import { RecordDebtForm, DebtRecoveryForm } from './DebtForms';
+import ListPagination, { PAGE_SIZE } from '@/components/ui/ListPagination';
+
+type DebtSummaryRow = { status: string; debt_type: string; amount_minor: number; amount_recovered_minor: number };
 
 const STATUS_STYLE: Record<string, string> = {
   OUTSTANDING: 'bg-red-50 text-red-700',
@@ -57,11 +60,14 @@ function EditDebtForm({ debt, onClose, onSaved }: { debt: DebtRecord; onClose: (
 
 export default function DebtRegisterPage({ can, onNotice }: { can: (p: string) => boolean; onNotice: (m: string) => void }) {
   const [debts, setDebts] = useState<DebtRecord[]>([]);
+  const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState<DebtSummaryRow[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [refreshKey, setRefreshKey] = useState(0);
+  const [page, setPage] = useState(0);
   const [showForm, setShowForm] = useState(false);
   const [recoveryDebt, setRecoveryDebt] = useState<DebtRecord | null>(null);
   const [editDebt, setEditDebt] = useState<DebtRecord | null>(null);
@@ -72,20 +78,35 @@ export default function DebtRegisterPage({ can, onNotice }: { can: (p: string) =
     supabase.from('employees').select('*').eq('active', true).order('full_name').then(({ data }) => setEmployees((data ?? []) as Employee[]));
   }, []);
 
+  useEffect(() => { setPage(0); }, [typeFilter, statusFilter]);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
-      let q = supabase.from('debt_records').select('*').order('incurred_date', { ascending: false }).order('created_at', { ascending: false });
+      let q = supabase.from('debt_records').select('*', { count: 'exact' }).order('incurred_date', { ascending: false }).order('created_at', { ascending: false });
       if (typeFilter !== 'ALL') q = q.eq('debt_type', typeFilter);
       if (statusFilter !== 'ALL') q = q.eq('status', statusFilter);
-      const { data } = await q.limit(300);
+      const { data, count } = await q.range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
       setDebts((data ?? []) as DebtRecord[]);
+      setTotal(count ?? 0);
       setLoading(false);
+    })();
+  }, [typeFilter, statusFilter, page, refreshKey]);
+
+  // Summary metrics cover every matching record, not just the current page — a
+  // separate, lightweight (no pagination) query keeps the totals correct.
+  useEffect(() => {
+    (async () => {
+      let q = supabase.from('debt_records').select('status,debt_type,amount_minor,amount_recovered_minor');
+      if (typeFilter !== 'ALL') q = q.eq('debt_type', typeFilter);
+      if (statusFilter !== 'ALL') q = q.eq('status', statusFilter);
+      const { data } = await q.limit(5000);
+      setSummary((data ?? []) as DebtSummaryRow[]);
     })();
   }, [typeFilter, statusFilter, refreshKey]);
 
-  const totalOutstanding = debts.filter((d) => d.status !== 'WRITTEN_OFF').reduce((s, d) => s + (d.amount_minor - d.amount_recovered_minor), 0);
-  const openCount = debts.filter((d) => d.status === 'OUTSTANDING' || d.status === 'PARTIALLY_RECOVERED').length;
+  const totalOutstanding = summary.filter((d) => d.status !== 'WRITTEN_OFF').reduce((s, d) => s + (d.amount_minor - d.amount_recovered_minor), 0);
+  const openCount = summary.filter((d) => d.status === 'OUTSTANDING' || d.status === 'PARTIALLY_RECOVERED').length;
 
   function onNoticeAndRefresh(m: string) { onNotice(m); refresh(); }
 
@@ -96,9 +117,9 @@ export default function DebtRegisterPage({ can, onNotice }: { can: (p: string) =
     </div>
     <div className="metric-grid" style={{ marginBottom: 20 }}>
       <div className="metric-card"><div className="metric-icon red"><AlertTriangle size={18} /></div><div className="metric-copy"><span>Total Outstanding</span><strong>{formatKes(totalOutstanding)}</strong><small>{openCount} open debt{openCount === 1 ? '' : 's'}</small></div></div>
-      <div className="metric-card"><div className="metric-copy"><span>Customer debt</span><strong>{formatKes(debts.filter((d) => d.debt_type === 'CUSTOMER' && d.status !== 'WRITTEN_OFF').reduce((s, d) => s + (d.amount_minor - d.amount_recovered_minor), 0))}</strong></div></div>
-      <div className="metric-card"><div className="metric-copy"><span>Staff liability</span><strong>{formatKes(debts.filter((d) => d.debt_type === 'STAFF' && d.status !== 'WRITTEN_OFF').reduce((s, d) => s + (d.amount_minor - d.amount_recovered_minor), 0))}</strong></div></div>
-      <div className="metric-card"><div className="metric-copy"><span>Recovered (this view)</span><strong>{formatKes(debts.reduce((s, d) => s + d.amount_recovered_minor, 0))}</strong></div></div>
+      <div className="metric-card"><div className="metric-copy"><span>Customer debt</span><strong>{formatKes(summary.filter((d) => d.debt_type === 'CUSTOMER' && d.status !== 'WRITTEN_OFF').reduce((s, d) => s + (d.amount_minor - d.amount_recovered_minor), 0))}</strong></div></div>
+      <div className="metric-card"><div className="metric-copy"><span>Staff liability</span><strong>{formatKes(summary.filter((d) => d.debt_type === 'STAFF' && d.status !== 'WRITTEN_OFF').reduce((s, d) => s + (d.amount_minor - d.amount_recovered_minor), 0))}</strong></div></div>
+      <div className="metric-card"><div className="metric-copy"><span>Recovered (this view)</span><strong>{formatKes(summary.reduce((s, d) => s + d.amount_recovered_minor, 0))}</strong></div></div>
     </div>
     <div className="filter-bar">
       <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}><option value="ALL">All types</option><option value="CUSTOMER">Customer debt</option><option value="STAFF">Staff liability</option></select>
@@ -107,6 +128,7 @@ export default function DebtRegisterPage({ can, onNotice }: { can: (p: string) =
       </select>
     </div>
     {loading ? <div className="empty"><strong>Loading...</strong></div> : debts.length === 0 ? <div className="empty"><AlertTriangle size={20} /><strong>No debts recorded</strong><span>Nothing owed matches this filter.</span></div> : (
+      <>
       <div className="report-table-wrap"><table className="report-table"><thead><tr>
         <th>Date</th><th>Type</th><th>Responsible</th><th>What</th><th>Amount</th><th>Balance</th><th>Status</th><th />
       </tr></thead><tbody>{debts.map((d) => <tr key={d.id} className="clickable" onClick={() => { if (d.status === 'OUTSTANDING' || d.status === 'PARTIALLY_RECOVERED') setRecoveryDebt(d); }}>
@@ -119,6 +141,8 @@ export default function DebtRegisterPage({ can, onNotice }: { can: (p: string) =
         <td><span className={`status ${STATUS_STYLE[d.status] ?? ''}`}>{d.status.replaceAll('_', ' ')}</span></td>
         <td>{can('debt.manage') && (d.status === 'OUTSTANDING' || d.status === 'PARTIALLY_RECOVERED') && <button className="close-button" style={{ width: 28, height: 28 }} title="Edit" onClick={(e) => { e.stopPropagation(); setEditDebt(d); }}><Edit size={13} /></button>}</td>
       </tr>)}</tbody></table></div>
+      <ListPagination page={page} total={total} onPageChange={setPage} />
+      </>
     )}
     {showForm && <RecordDebtForm employees={employees} onClose={() => setShowForm(false)} onSaved={onNoticeAndRefresh} />}
     {recoveryDebt && <DebtRecoveryForm debt={recoveryDebt} onClose={() => setRecoveryDebt(null)} onSaved={onNoticeAndRefresh} />}

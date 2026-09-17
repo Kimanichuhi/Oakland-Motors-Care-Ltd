@@ -2,8 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { DebtRecord } from '@/lib/types';
 import { formatKes, formatDate, downloadCSV } from '@/lib/formatting';
-import { Download, Wrench, AlertTriangle, CheckCircle2, Ban, ChevronRight } from 'lucide-react';
+import { Download, Wrench, ShoppingBag, AlertTriangle, CheckCircle2, Ban, ChevronRight } from 'lucide-react';
 import { fetchJobCardDebts, type JobCardDebtRow } from './jobCardDebt';
+import { fetchSalesDebts, type SalesDebtRow } from './salesDebt';
 
 type Row = { key: string; label: string; sub: string; amount_minor: number; count: number };
 type TypeFilter = 'ALL' | 'CUSTOMER' | 'STAFF';
@@ -40,21 +41,24 @@ function RankedTable({ rows, headLabel }: { rows: Row[]; headLabel: string }) {
   );
 }
 
-export default function DebtReportsPage({ onSelectJob }: { onSelectJob?: (id: string) => void }) {
+export default function DebtReportsPage({ onSelectJob, onSelectSale }: { onSelectJob?: (id: string) => void; onSelectSale?: (id: string) => void }) {
   const [debts, setDebts] = useState<DebtRecord[]>([]);
   const [jobDebts, setJobDebts] = useState<JobCardDebtRow[]>([]);
+  const [saleDebts, setSaleDebts] = useState<SalesDebtRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('ALL');
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const [{ data: debtRows }, jobRows] = await Promise.all([
+      const [{ data: debtRows }, jobRows, saleRows] = await Promise.all([
         supabase.from('debt_records').select('*').order('incurred_date', { ascending: false }).limit(1000),
         fetchJobCardDebts(),
+        fetchSalesDebts(),
       ]);
       setDebts((debtRows ?? []) as DebtRecord[]);
       setJobDebts(jobRows);
+      setSaleDebts(saleRows);
       setLoading(false);
     })();
   }, []);
@@ -63,12 +67,14 @@ export default function DebtReportsPage({ onSelectJob }: { onSelectJob?: (id: st
   const includeCustomer = typeFilter !== 'STAFF';
   const includeStaff = typeFilter !== 'CUSTOMER';
   const includeJobDebts = includeCustomer; // job-card balances are always customer debt
+  const includeSaleDebts = includeCustomer; // credit-sale balances are always customer debt
 
   const visibleDebts = useMemo(() => openDebts.filter((d) => (d.debt_type === 'CUSTOMER' ? includeCustomer : includeStaff)), [openDebts, includeCustomer, includeStaff]);
   const visibleJobDebts = includeJobDebts ? jobDebts : [];
+  const visibleSaleDebts = includeSaleDebts ? saleDebts : [];
 
-  const totalOutstanding = visibleDebts.reduce((s, d) => s + (d.amount_minor - d.amount_recovered_minor), 0) + visibleJobDebts.reduce((s, j) => s + j.balance_minor, 0);
-  const customerOutstanding = openDebts.filter((d) => d.debt_type === 'CUSTOMER').reduce((s, d) => s + (d.amount_minor - d.amount_recovered_minor), 0) + jobDebts.reduce((s, j) => s + j.balance_minor, 0);
+  const totalOutstanding = visibleDebts.reduce((s, d) => s + (d.amount_minor - d.amount_recovered_minor), 0) + visibleJobDebts.reduce((s, j) => s + j.balance_minor, 0) + visibleSaleDebts.reduce((s, sd) => s + sd.balance_minor, 0);
+  const customerOutstanding = openDebts.filter((d) => d.debt_type === 'CUSTOMER').reduce((s, d) => s + (d.amount_minor - d.amount_recovered_minor), 0) + jobDebts.reduce((s, j) => s + j.balance_minor, 0) + saleDebts.reduce((s, sd) => s + sd.balance_minor, 0);
   const staffOutstanding = openDebts.filter((d) => d.debt_type === 'STAFF').reduce((s, d) => s + (d.amount_minor - d.amount_recovered_minor), 0);
   const totalRecovered = debts.reduce((s, d) => s + d.amount_recovered_minor, 0);
   const writtenOff = debts.filter((d) => d.status === 'WRITTEN_OFF');
@@ -77,11 +83,13 @@ export default function DebtReportsPage({ onSelectJob }: { onSelectJob?: (id: st
   const byPerson = aggregate([
     ...visibleDebts.map((d) => ({ key: `M:${d.responsible_name}`, label: d.responsible_name, sub: 'Debt Register', amount_minor: d.amount_minor - d.amount_recovered_minor })),
     ...visibleJobDebts.map((j) => ({ key: `W:${j.technician_name ?? 'Unassigned'}`, label: j.technician_name ?? 'Unassigned', sub: 'Work Orders', amount_minor: j.balance_minor })),
+    ...visibleSaleDebts.map((sd) => ({ key: `S:${sd.customer_name ?? 'Walk-in customer'}`, label: sd.customer_name ?? 'Walk-in customer', sub: 'Credit Sales', amount_minor: sd.balance_minor })),
   ]);
 
   const byProduct = aggregate([
     ...visibleDebts.map((d) => ({ key: `P:${d.item_description}`, label: d.item_description, sub: 'Debt Register', amount_minor: d.amount_minor - d.amount_recovered_minor })),
     ...visibleJobDebts.map((j) => ({ key: `P:${j.complaint ?? 'Work order'}`, label: j.complaint ?? 'Work order', sub: 'Work Orders', amount_minor: j.balance_minor })),
+    ...visibleSaleDebts.map((sd) => ({ key: `P:Credit sale (${sd.payment_method})`, label: `Credit sale (${sd.payment_method})`, sub: 'Credit Sales', amount_minor: sd.balance_minor })),
   ]);
 
   function exportByPerson() {
@@ -107,7 +115,7 @@ export default function DebtReportsPage({ onSelectJob }: { onSelectJob?: (id: st
     </div>
 
     <div className="metric-grid" style={{ marginBottom: 18 }}>
-      <div className="metric-card"><div className="metric-icon red"><AlertTriangle size={18} /></div><div className="metric-copy"><span>Total Outstanding</span><strong>{formatKes(totalOutstanding)}</strong><small>{visibleDebts.length + visibleJobDebts.length} open item{visibleDebts.length + visibleJobDebts.length === 1 ? '' : 's'}</small></div></div>
+      <div className="metric-card"><div className="metric-icon red"><AlertTriangle size={18} /></div><div className="metric-copy"><span>Total Outstanding</span><strong>{formatKes(totalOutstanding)}</strong><small>{visibleDebts.length + visibleJobDebts.length + visibleSaleDebts.length} open item{visibleDebts.length + visibleJobDebts.length + visibleSaleDebts.length === 1 ? '' : 's'}</small></div></div>
       <div className="metric-card"><div className="metric-copy"><span>Customer debt</span><strong>{formatKes(customerOutstanding)}</strong></div></div>
       <div className="metric-card"><div className="metric-copy"><span>Staff liability</span><strong>{formatKes(staffOutstanding)}</strong></div></div>
       <div className="metric-card"><div className="metric-icon green"><CheckCircle2 size={18} /></div><div className="metric-copy"><span>Recovered (all-time)</span><strong>{formatKes(totalRecovered)}</strong></div></div>
@@ -140,6 +148,17 @@ export default function DebtReportsPage({ onSelectJob }: { onSelectJob?: (id: st
         <td>{j.technician_name ?? <span className="muted">Unassigned</span>}</td>
         <td style={{ fontWeight: 800, color: '#a4493d' }}>{formatKes(j.balance_minor)}</td>
         <td>{onSelectJob && <ChevronRight size={16} className="row-arrow" />}</td>
+      </tr>)}</tbody></table></div>}
+    </section>}
+
+    {includeSaleDebts && <section className="panel" style={{ marginTop: 20 }}>
+      <div className="panel-heading"><div><p className="eyebrow">Live from Sales</p><h3>Open Credit Sale Balances</h3></div></div>
+      {saleDebts.length === 0 ? <div className="empty"><ShoppingBag size={18} /><strong>No open balances</strong><span>Every counter sale is settled.</span></div> : <div className="report-table-wrap"><table className="report-table"><thead><tr>
+        <th>Sale Number</th><th>Date</th><th>Customer</th><th>Phone</th><th>Payment Method</th><th>Balance</th><th />
+      </tr></thead><tbody>{saleDebts.map((sd) => <tr key={sd.id} className={onSelectSale ? 'clickable' : ''} onClick={() => onSelectSale?.(sd.id)}>
+        <td><strong>{sd.sale_number}</strong></td><td>{formatDate(sd.sale_date)}</td><td>{sd.customer_name ?? '—'}</td><td>{sd.customer_phone ?? '—'}</td><td>{sd.payment_method}</td>
+        <td style={{ fontWeight: 800, color: '#a4493d' }}>{formatKes(sd.balance_minor)}</td>
+        <td>{onSelectSale && <ChevronRight size={16} className="row-arrow" />}</td>
       </tr>)}</tbody></table></div>}
     </section>}
   </>;

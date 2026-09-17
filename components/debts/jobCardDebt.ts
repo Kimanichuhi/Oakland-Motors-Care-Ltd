@@ -36,6 +36,7 @@ export async function fetchJobCardDebts(): Promise<JobCardDebtRow[]> {
     .from('job_cards')
     .select('id,job_number,complaint,created_at,other_charges_minor,customers(full_name),vehicles(registration_number),job_card_labour(quantity,unit_price_minor,tax_rate),job_card_parts(quantity,unit_price_minor),job_card_signoffs(role,name),invoices(status,total_minor,amount_paid_minor)')
     .is('deleted_at', null)
+    .neq('status', 'CANCELLED')
     .order('created_at', { ascending: false })
     .limit(300);
 

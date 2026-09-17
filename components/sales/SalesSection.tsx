@@ -5,6 +5,9 @@ import { formatKes, formatDate, downloadCSV, localDateStr } from '@/lib/formatti
 import { statusStyles } from '@/lib/constants';
 import BulkSalesUploadDialog from '@/components/sales/BulkSalesUpload';
 import { Plus, Search, MoreVertical, Eye, Download, Printer, X, Upload } from 'lucide-react';
+import ListPagination, { PAGE_SIZE } from '@/components/ui/ListPagination';
+
+const SALES_SELECT = '*, job_cards(job_number), sale_items(part_name, part_sku, quantity, unit_price_minor, line_total_minor, shelf_count_at_sale, system_stock_after)';
 
 type SaleItemRow = { part_name: string; part_sku: string; quantity: number; unit_price_minor: number; line_total_minor: number; shelf_count_at_sale: number | null; system_stock_after: number | null };
 type SaleRow = Sale & { job_cards: { job_number: string } | null; sale_items: SaleItemRow[] };
@@ -75,56 +78,74 @@ function SaleRowMenu({ onView }: { onView: () => void }) {
 
 export default function SalesSection({ query, onNew, onSelect, can, onNotice }: { query: string; onNew: () => void; onSelect: (id: string) => void; can: (p: string) => boolean; onNotice: (m: string) => void }) {
   const [sales, setSales] = useState<SaleRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [productFilter, setProductFilter] = useState('');
   const [showPrint, setShowPrint] = useState(false);
+  const [printRows, setPrintRows] = useState<{ sale: SaleRow; dayTotalMinor: number | null }[]>([]);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [exporting, setExporting] = useState(false);
+
+  useEffect(() => { setPage(0); }, [query, fromDate, toDate]);
 
   useEffect(() => {
     let mounted = true;
     async function load() {
       setLoading(true);
-      let q = supabase.from('sales').select('*, job_cards(job_number), sale_items(part_name, part_sku, quantity, unit_price_minor, line_total_minor, shelf_count_at_sale, system_stock_after)').order('sale_date', { ascending: false }).limit(200);
+      let q = supabase.from('sales').select(SALES_SELECT, { count: 'exact' }).order('sale_date', { ascending: false });
       if (query) q = q.or(`sale_number.ilike.%${query}%,customer_name.ilike.%${query}%,customer_phone.ilike.%${query}%`);
-      const { data, error } = await q;
+      if (fromDate) q = q.gte('sale_date', `${fromDate}T00:00:00`);
+      if (toDate) q = q.lte('sale_date', `${toDate}T23:59:59`);
+      const { data, count, error } = await q.range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
       if (!mounted) return;
       setLoadError(error ? error.message : '');
       setSales((data ?? []) as SaleRow[]);
+      setTotal(count ?? 0);
       setLoading(false);
     }
     void load();
     return () => { mounted = false; };
-  }, [query, refreshKey]);
+  }, [query, fromDate, toDate, page, refreshKey]);
 
+  // Product name only narrows the current page — it's a quick on-screen scan, not a
+  // full-database search (Export/Print below re-fetch every matching sale instead).
   const filteredSales = useMemo(() => {
     const term = productFilter.trim().toLowerCase();
-    return sales.filter((s) => {
-      const saleDay = localDateStr(new Date(s.sale_date));
-      if (fromDate && saleDay < fromDate) return false;
-      if (toDate && saleDay > toDate) return false;
-      if (term && !s.sale_items.some((it) => it.part_name.toLowerCase().includes(term))) return false;
-      return true;
-    });
-  }, [sales, fromDate, toDate, productFilter]);
-
-  // Day totals read naturally in chronological order within each day; the list itself stays newest-first.
-  const chronological = useMemo(() => [...filteredSales].sort((a, b) => a.sale_date.localeCompare(b.sale_date)), [filteredSales]);
-  const dayTotalBySaleId = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const { sale, dayTotalMinor } of withDayTotals(chronological)) if (dayTotalMinor !== null) map.set(sale.id, dayTotalMinor);
-    return map;
-  }, [chronological]);
+    if (!term) return sales;
+    return sales.filter((s) => s.sale_items.some((it) => it.part_name.toLowerCase().includes(term)));
+  }, [sales, productFilter]);
 
   const filterLabel = [
     fromDate || toDate ? `${fromDate || 'earliest'} to ${toDate || 'latest'}` : 'All dates',
     productFilter.trim() ? `Product: "${productFilter.trim()}"` : null,
   ].filter(Boolean).join(' · ');
 
-  function exportCSV() {
+  /** Export/Print need every matching sale, not just the on-screen page — fetched
+   * fresh here (same query+fromDate/toDate filters, no pagination) so day totals
+   * (withDayTotals needs a full, unbroken day of rows) and totals stay correct
+   * regardless of which page the table happens to be showing. */
+  async function fetchExportRows(): Promise<SaleRow[]> {
+    let q = supabase.from('sales').select(SALES_SELECT).order('sale_date', { ascending: false }).limit(5000);
+    if (query) q = q.or(`sale_number.ilike.%${query}%,customer_name.ilike.%${query}%,customer_phone.ilike.%${query}%`);
+    if (fromDate) q = q.gte('sale_date', `${fromDate}T00:00:00`);
+    if (toDate) q = q.lte('sale_date', `${toDate}T23:59:59`);
+    const { data } = await q;
+    const rows = (data ?? []) as SaleRow[];
+    const term = productFilter.trim().toLowerCase();
+    const matching = term ? rows.filter((s) => s.sale_items.some((it) => it.part_name.toLowerCase().includes(term))) : rows;
+    return [...matching].sort((a, b) => a.sale_date.localeCompare(b.sale_date));
+  }
+
+  async function exportCSV() {
+    setExporting(true);
+    const chronological = await fetchExportRows();
+    setExporting(false);
+    if (chronological.length === 0) { onNotice('There are no sales to export.'); return; }
     downloadCSV(`Oakland_Sales_${new Date().toISOString().slice(0, 10)}.csv`, withDayTotals(chronological).map(({ sale: s, dayTotalMinor }) => ({
       'Date': localDateStr(new Date(s.sale_date)),
       'Change in days': s.change_in_days,
@@ -148,6 +169,14 @@ export default function SalesSection({ query, onNew, onSelect, can, onNotice }: 
     })));
   }
 
+  async function openPrint() {
+    setExporting(true);
+    const chronological = await fetchExportRows();
+    setExporting(false);
+    setPrintRows(withDayTotals(chronological));
+    setShowPrint(true);
+  }
+
   return (
     <div>
       <div className="panel-heading">
@@ -165,8 +194,8 @@ export default function SalesSection({ query, onNew, onSelect, can, onNotice }: 
         <label>Product<input value={productFilter} onChange={(e) => setProductFilter(e.target.value)} placeholder="Search by product name..." /></label>
       </div>
       <div className="action-buttons" style={{ marginBottom: 16 }}>
-        <button type="button" className="button secondary small" onClick={exportCSV} disabled={filteredSales.length === 0}><Download size={15} /> Export CSV</button>
-        <button type="button" className="button secondary small" onClick={() => setShowPrint(true)} disabled={filteredSales.length === 0}><Printer size={15} /> Print / Export PDF</button>
+        <button type="button" className="button secondary small" onClick={() => void exportCSV()} disabled={exporting || total === 0}><Download size={15} /> {exporting ? 'Exporting…' : 'Export CSV'}</button>
+        <button type="button" className="button secondary small" onClick={() => void openPrint()} disabled={exporting || total === 0}><Printer size={15} /> Print / Export PDF</button>
         {(fromDate || toDate || productFilter) && <button type="button" className="text-button" onClick={() => { setFromDate(''); setToDate(''); setProductFilter(''); }}>Clear filters</button>}
       </div>
 
@@ -217,10 +246,11 @@ export default function SalesSection({ query, onNew, onSelect, can, onNotice }: 
               </tbody>
             </table>
           </div>
+          <ListPagination page={page} total={total} onPageChange={setPage} />
         </div>
       )}
 
-      {showPrint && <SalesPrintView rows={withDayTotals(chronological)} filterLabel={filterLabel} onClose={() => setShowPrint(false)} />}
+      {showPrint && <SalesPrintView rows={printRows} filterLabel={filterLabel} onClose={() => setShowPrint(false)} />}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import Image from 'next/image';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
 
 export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
@@ -10,7 +11,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
     <div className="auth-layout">
       <div className="auth-panel">
         <div className="auth-card">
-          <img src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" />
+          <Image src="/logo.png" alt="Oakland Motor Care Ltd" className="auth-logo" width={1774} height={887} priority />
           <div className="auth-icon"><AlertTriangle size={22} /></div>
           <h2>Something went wrong</h2>
           <p className="muted">
