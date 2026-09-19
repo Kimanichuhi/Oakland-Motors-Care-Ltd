@@ -83,6 +83,7 @@ export default function BulkPartsUploadDialog({ onClose, onSaved }: { onClose: (
         let targetId = row.existingId ?? (row.linkSku ? skuToRealId.get(row.linkSku) : undefined);
 
         if (row.action === 'CREATE') {
+          if (!row.createPayload) throw new Error('Missing data to create this part.');
           const { data, error } = await supabase.from('parts').insert(row.createPayload).select('id').single();
           if (error) throw error;
           const newId = (data as { id: string }).id;

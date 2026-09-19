@@ -1,15 +1,13 @@
 import './globals.css';
-import type { Metadata } from 'next';
-import { Poppins } from 'next/font/google';
+import type { Metadata, Viewport } from 'next';
+import { Josefin_Sans } from 'next/font/google';
 import InstallBanner from '@/components/InstallBanner';
 
-const poppins = Poppins({ subsets: ['latin'], weight: ['400', '500', '600', '700', '800'], variable: '--font-sans' });
+const josefinSans = Josefin_Sans({ subsets: ['latin'], weight: ['400', '500', '600', '700'], variable: '--font-sans' });
 
 export const metadata: Metadata = {
   title: 'Oakland Motor Care Ltd | Workshop Operations',
   description: 'The operating system for Oakland Motor Care Ltd workshop operations.',
-  themeColor: '#10263f',
-  viewport: { width: 'device-width', initialScale: 1, viewportFit: 'cover' },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
@@ -17,6 +15,13 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  themeColor: '#10263f',
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+};
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return <html lang="en"><body className={poppins.variable}>{children}<InstallBanner /></body></html>;
+  return <html lang="en"><body className={josefinSans.variable}>{children}<InstallBanner /></body></html>;
 }
