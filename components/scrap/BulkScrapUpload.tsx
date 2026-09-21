@@ -22,6 +22,23 @@ function downloadScrapTemplate() {
 
 const ACTION_ORDER: Record<ScrapPlannedOp['kind'], number> = { CASH: 0, PURCHASE: 1, EXPENSE: 2 };
 
+// err instanceof Error misses real, informative failures that aren't Error
+// instances — a Supabase PostgrestError still has a usable .message even if
+// something upstream re-wraps it, and an aborted/timed-out fetch throws a
+// DOMException, which has .name/.message but does NOT extend Error.
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message || err.name;
+  if (typeof err === 'object' && err !== null) {
+    const obj = err as Record<string, unknown>;
+    if (typeof obj.message === 'string' && obj.message) {
+      const name = typeof obj.name === 'string' && obj.name !== 'Error' ? `${obj.name}: ` : '';
+      return `${name}${obj.message}`;
+    }
+  }
+  if (typeof err === 'string' && err) return err;
+  return 'Unable to save this entry (no error detail was returned).';
+}
+
 type FailedRow = { row: ScrapPlannedRow; message: string };
 
 // Cash added first, then purchases, then expenses, grouped by date oldest-first —
@@ -96,7 +113,7 @@ export default function BulkScrapUploadDialog({ onClose, onSaved, can }: { onClo
         }
         createdCount++;
       } catch (err) {
-        failures.push({ row, message: err instanceof Error ? err.message : 'Unable to save this entry.' });
+        failures.push({ row, message: errorMessage(err) });
       }
       setProgress((p) => p + 1);
     }
