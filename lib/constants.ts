@@ -104,7 +104,7 @@ export const STOCK_CYCLE_STATUSES = ['OPEN','CLOSED'] as const;
 // Joseph's paper/Excel scrap sheet always lists types in this order rather than
 // alphabetically — mirrored here so every scrap screen (purchase entry, stock
 // position, item manager) reads the same way his sheet does.
-export const SCRAP_TYPE_ORDER = ['Heavy 1','Heavy 2','Light 1','Light 2','Soft','ND 1','ND 2','Plastic','Battery 1','Battery 2','Brass','Gumboot','Hard','Cast'];
+export const SCRAP_TYPE_ORDER = ['Heavy 1','Heavy 2','Light 1','Light 2','Soft','DAWA 1','DAWA 2','Plastic','Battery 1','Battery 2','Brass','Gumboot','Hard','Cast'];
 
 /** Sorts by position in SCRAP_TYPE_ORDER (matched case-insensitively); anything not
  * on the sheet falls after, alphabetically. */
@@ -118,14 +118,14 @@ export function byScrapTypeOrder<T extends { name: string }>(a: T, b: T): number
   return ai - bi;
 }
 
-// Heavy 1/2, Light 1/2 and ND 1/2 are the same scrap type bought at different
+// Heavy 1/2, Light 1/2 and DAWA 1/2 are the same scrap type bought at different
 // supplier rates — Joseph tracks them separately for pricing but wants the stock
 // position screen to show them as one combined line. Battery 1/2 are genuinely
 // different grades and stay split.
 export const SCRAP_TYPE_GROUPS: Record<string, string> = {
   'heavy 1': 'Heavy', 'heavy 2': 'Heavy',
   'light 1': 'Light', 'light 2': 'Light',
-  'nd 1': 'ND', 'nd 2': 'ND',
+  'dawa 1': 'DAWA', 'dawa 2': 'DAWA',
 };
 
 export function scrapGroupLabel(name: string): string {

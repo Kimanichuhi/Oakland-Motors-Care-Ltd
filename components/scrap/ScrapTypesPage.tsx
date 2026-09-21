@@ -19,6 +19,8 @@ export default function ScrapTypesPage({ can, onNotice }: { can: (p: string) => 
 
   const [newName, setNewName] = useState('');
   const [newRate, setNewRate] = useState('');
+  const [newOpeningQuantity, setNewOpeningQuantity] = useState('');
+  const [newOpeningReason, setNewOpeningReason] = useState('');
   const [adding, setAdding] = useState(false);
 
   function refresh() { setRefreshKey((k) => k + 1); }
@@ -75,12 +77,16 @@ export default function ScrapTypesPage({ can, onNotice }: { can: (p: string) => 
     setError('');
     const name = newName.trim();
     if (!name) { setError('Name is required.'); return; }
+    const openingQuantity = parseFloat(newOpeningQuantity) || 0;
+    if (openingQuantity > 0 && !newOpeningReason.trim()) { setError('Enter a reason/source for the opening stock.'); return; }
     setAdding(true);
     try {
       const rateMinor = newRate.trim() === '' ? null : Math.round(parseFloat(newRate) * 100);
-      const { error: err } = await supabase.rpc('scrap_add_item', { p_name: name, p_rate_minor: rateMinor });
+      const { error: err } = await supabase.rpc('scrap_add_item', {
+        p_name: name, p_rate_minor: rateMinor, p_opening_quantity: openingQuantity, p_reason: newOpeningReason.trim() || null,
+      });
       if (err) throw err;
-      setNewName(''); setNewRate('');
+      setNewName(''); setNewRate(''); setNewOpeningQuantity(''); setNewOpeningReason('');
       refresh();
       onNotice(`${name} added to scrap types.`);
     } catch (err) {
@@ -127,10 +133,14 @@ export default function ScrapTypesPage({ can, onNotice }: { can: (p: string) => 
         )}
 
         {canManage && (
-          <form onSubmit={addItem} className="form-row modal-form" style={{ marginTop: 18, gridTemplateColumns: '1fr 120px auto', alignItems: 'center' }}>
-            <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New scrap type name" required />
-            <input type="number" min={0} step="0.01" value={newRate} onChange={(e) => setNewRate(e.target.value)} placeholder="Rate/kg (optional)" />
-            <button className="button primary small" type="submit" disabled={adding}><Plus size={15} /> Add</button>
+          <form onSubmit={addItem} className="modal-form" style={{ marginTop: 18 }}>
+            <div className="form-row" style={{ gridTemplateColumns: '1fr 120px 120px auto', alignItems: 'center' }}>
+              <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New scrap type name" required />
+              <input type="number" min={0} step="0.01" value={newRate} onChange={(e) => setNewRate(e.target.value)} placeholder="Rate/kg (optional)" />
+              <input type="number" min={0} step="0.01" value={newOpeningQuantity} onChange={(e) => setNewOpeningQuantity(e.target.value)} placeholder="Opening KG (optional)" />
+              <button className="button primary small" type="submit" disabled={adding}><Plus size={15} /> Add</button>
+            </div>
+            {parseFloat(newOpeningQuantity) > 0 && <input value={newOpeningReason} onChange={(e) => setNewOpeningReason(e.target.value)} placeholder="Reason / source of opening stock" required />}
           </form>
         )}
       </section>

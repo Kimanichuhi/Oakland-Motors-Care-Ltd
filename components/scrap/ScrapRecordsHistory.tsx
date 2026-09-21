@@ -4,8 +4,9 @@ import { supabase } from '@/lib/supabase';
 import type { ScrapCashSummary, ScrapItem, ScrapPurchase, ScrapExpense } from '@/lib/types';
 import { formatKes, formatKg, formatDate } from '@/lib/formatting';
 import { byScrapTypeOrder } from '@/lib/constants';
-import { Search, ChevronRight, Calendar, Printer, Download } from 'lucide-react';
+import { Search, ChevronRight, Calendar, Printer, Download, Upload } from 'lucide-react';
 import ScrapDailyDetail from './ScrapDailyDetail';
+import BulkScrapUploadDialog from './BulkScrapUpload';
 import ListPagination, { PAGE_SIZE } from '@/components/ui/ListPagination';
 
 export default function ScrapRecordsHistory({ can, onNotice, onRefresh, refreshKey }: {
@@ -23,6 +24,7 @@ export default function ScrapRecordsHistory({ can, onNotice, onRefresh, refreshK
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showPrint, setShowPrint] = useState(false);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
 
   useEffect(() => { supabase.from('scrap_items').select('*').order('name').then(({ data }) => setItems(((data ?? []) as ScrapItem[]).sort(byScrapTypeOrder))); }, []);
 
@@ -59,7 +61,10 @@ export default function ScrapRecordsHistory({ can, onNotice, onRefresh, refreshK
     <div>
       <div className="panel-heading">
         <div><p className="eyebrow">Daily records</p><h3>Scrap &amp; cash history</h3></div>
-        <button className="button secondary small" onClick={() => setShowPrint(true)}><Printer size={14} /> Export PDF</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {can('scrap.record') && <button className="button secondary small" onClick={() => setShowBulkUpload(true)}><Upload size={14} /> Bulk upload</button>}
+          <button className="button secondary small" onClick={() => setShowPrint(true)}><Printer size={14} /> Export PDF</button>
+        </div>
       </div>
 
       <div className="filter-bar" style={{ marginBottom: 18 }}>
@@ -91,6 +96,7 @@ export default function ScrapRecordsHistory({ can, onNotice, onRefresh, refreshK
       )}
 
       {showPrint && <ScrapRecordsPrintView fromDate={fromDate} toDate={toDate} scrapItemId={scrapItemId} scrapItemName={items.find((i) => i.id === scrapItemId)?.name ?? null} onClose={() => setShowPrint(false)} onNotice={onNotice} />}
+      {showBulkUpload && <BulkScrapUploadDialog can={can} onClose={() => setShowBulkUpload(false)} onSaved={(m) => { setShowBulkUpload(false); onNotice(m); onRefresh(); }} />}
     </div>
   );
 }

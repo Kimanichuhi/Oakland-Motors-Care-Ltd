@@ -38,7 +38,7 @@ export default function ScrapStockTab({ stock, can, onClear, onNewCycle, onNotic
     setExpanded((prev) => { const next = new Set(prev); if (next.has(label)) next.delete(label); else next.add(label); return next; });
   }
 
-  // Heavy 1/2, Light 1/2 and ND 1/2 are the same scrap type at different supplier
+  // Heavy 1/2, Light 1/2 and DAWA 1/2 are the same scrap type at different supplier
   // rates — combined into one line here; every other type (including Battery 1/2,
   // which are genuinely different grades) stays as its own single-member group.
   const groups = useMemo(() => {
