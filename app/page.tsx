@@ -29,6 +29,7 @@ import ScrapFinancesPage from '@/components/scrap/ScrapFinancesPage';
 import ScrapReportsPage from '@/components/scrap/ScrapReportsPage';
 import ScrapTypesPage from '@/components/scrap/ScrapTypesPage';
 import BulkPartsUploadDialog from '@/components/parts/BulkPartsUpload';
+import BulkJobCardsUploadDialog from '@/components/jobcards/BulkJobCardsUpload';
 import DebtsOverviewPage from '@/components/debts/DebtsOverviewPage';
 import DebtRegisterPage from '@/components/debts/DebtRegisterPage';
 import DebtReportsPage from '@/components/debts/DebtReportsPage';
@@ -951,6 +952,8 @@ function JobsSection({ query, onNew, onSelect, onNotice, can }: { query: string;
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [exporting, setExporting] = useState(false);
   const [page, setPage] = useState(0);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
   useEffect(() => { setPage(0); }, [query, statusFilter, bucketFilter]);
 
   async function exportWorkOrdersCSV() {
@@ -1007,11 +1010,12 @@ function JobsSection({ query, onNew, onSelect, onNotice, can }: { query: string;
       const { data, count } = await q.range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
       setJobs((data ?? []) as (JobCard & { vehicles: { registration_number: string } | null; customers: { full_name: string } | null })[]); setTotal(count ?? 0); setLoading(false);
     })();
-  }, [query, statusFilter, bucketFilter, page]);
+  }, [query, statusFilter, bucketFilter, page, refreshKey]);
 
   return <SectionPanel eyebrow="Workshop execution" title="Work Orders" onNew={can('job.create') ? onNew : undefined} newLabel="New work order">
     <div className="action-buttons" style={{ marginBottom: 16 }}>
       <button className="button secondary small" disabled={exporting} onClick={() => void exportWorkOrdersCSV()}><Download size={15} /> {exporting ? 'Exporting…' : 'Export CSV'}</button>
+      {can('job.create') && <button className="button secondary small" onClick={() => setShowBulkUpload(true)}><Upload size={15} /> Bulk upload</button>}
     </div>
     <div className="metric-grid" style={{ marginBottom: 20 }}>{JOB_STATUS_BUCKETS.map((b) => {
       const count = b.statuses.reduce((s, st) => s + (statusCounts[st] ?? 0), 0);
@@ -1035,6 +1039,7 @@ function JobsSection({ query, onNew, onSelect, onNotice, can }: { query: string;
       </tr>)}</tbody></table></div>
       <ListPagination page={page} total={total} onPageChange={setPage} />
     </>}
+    {showBulkUpload && <BulkJobCardsUploadDialog onClose={() => setShowBulkUpload(false)} onSaved={(m) => { setShowBulkUpload(false); onNotice(m); setRefreshKey((k) => k + 1); }} />}
   </SectionPanel>;
 }
 
