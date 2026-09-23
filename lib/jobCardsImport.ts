@@ -90,7 +90,7 @@ export type JobCardPlannedRow = {
     vehicleId: string;
     complaint: string;
     otherChargesMinor: number;
-    targetStatuses: ('OPEN' | 'IN_PROGRESS' | 'COMPLETED')[];
+    targetStatuses: ('OPEN' | 'IN_PROGRESS' | 'ON_HOLD' | 'COMPLETED')[];
     technicianName: string | null;
     payment: JobCardPayment | null;
     createdAtIso: string;
@@ -142,11 +142,11 @@ export function planJobCardRows(
     const otherChargesMinor = parseMoneyOrZero(row.totalCharge, 'Total Charge', warnings);
 
     const jobStatus = row.jobStatus.trim().toLowerCase();
-    let targetStatuses: ('OPEN' | 'IN_PROGRESS' | 'COMPLETED')[];
+    let targetStatuses: ('OPEN' | 'IN_PROGRESS' | 'ON_HOLD' | 'COMPLETED')[];
     if (jobStatus === 'completed') targetStatuses = ['OPEN', 'IN_PROGRESS', 'COMPLETED'];
     else if (jobStatus === 'in progress') targetStatuses = ['OPEN', 'IN_PROGRESS'];
     else if (jobStatus === 'pending') targetStatuses = ['OPEN'];
-    else if (jobStatus === 'on hold') { targetStatuses = ['OPEN']; warnings.push('Job Status "On Hold" has no matching status in this app — recorded as OPEN.'); }
+    else if (jobStatus === 'on hold') targetStatuses = ['OPEN', 'ON_HOLD'];
     else { targetStatuses = ['OPEN']; warnings.push(`Unrecognised Job Status "${row.jobStatus}" — recorded as OPEN.`); }
 
     const paymentStatus = row.paymentStatus.trim().toLowerCase();

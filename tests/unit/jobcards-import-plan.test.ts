@@ -51,12 +51,12 @@ describe('planJobCardRows', () => {
     expect(planned[0].payload).toMatchObject({ targetStatuses: ['OPEN', 'IN_PROGRESS'], payment: { amountMinor: 100000, method: 'CASH', reference: null } });
   });
 
-  it('maps "On Hold" to OPEN with a warning', () => {
+  it('maps "On Hold" directly to the app\'s ON_HOLD status, with no warning', () => {
     const { customersByKey, vehiclesByKey } = maps([WALK_IN_CUSTOMER_NAME], ['KBP568L']);
     const rows = parseJobCardsCSV([HEADER, '16 Sep 2026,,,KBP568L,WISH,,,ACCIDENT,JB-076,2000,0,Unpaid,2000,,On Hold'].join('\n'));
     const planned = planJobCardRows(rows, customersByKey, vehiclesByKey);
-    expect(planned[0].payload?.targetStatuses).toEqual(['OPEN']);
-    expect(planned[0].warnings.some((w) => w.includes('On Hold'))).toBe(true);
+    expect(planned[0].payload?.targetStatuses).toEqual(['OPEN', 'ON_HOLD']);
+    expect(planned[0].warnings.some((w) => w.includes('On Hold'))).toBe(false);
   });
 
   it('errors when the customer has not been resolved/created', () => {
@@ -108,11 +108,12 @@ describe('planJobCardRows against the real daily jobcards ledger', () => {
 
     const planned = planJobCardRows(rawRows, customersByKey, vehiclesByKey);
     const errorRows = planned.filter((r) => r.action === 'ERROR');
-    // Three rows in the source file are genuinely incomplete — no registration
-    // number (row 54) or no reason/service description (rows 81, 94). These
-    // can't be safely guessed at, so they're expected to need a manual fix in
-    // the CSV rather than a planner bug.
-    expect(errorRows.map((r) => r.rowNumber)).toEqual([54, 81, 94]);
+    // Row 81 has no reason/service description, which can't be safely guessed
+    // at, so it's expected to need a manual fix in the CSV rather than a
+    // planner bug. (Rows 54 and 94 had the same problem originally — missing
+    // registration number and reason respectively — and have since been
+    // fixed in the source file.)
+    expect(errorRows.map((r) => r.rowNumber)).toEqual([81]);
     expect(planned.length).toBe(rawRows.length);
   });
 });

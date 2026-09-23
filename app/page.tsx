@@ -926,6 +926,7 @@ const JOB_STATUS_BUCKETS: { key: string; label: string; statuses: string[] }[] =
   { key: 'DRAFT', label: 'Draft', statuses: ['DRAFT'] },
   { key: 'OPEN', label: 'Open', statuses: ['OPEN'] },
   { key: 'IN_PROGRESS', label: 'In progress', statuses: ['IN_PROGRESS'] },
+  { key: 'ON_HOLD', label: 'On hold', statuses: ['ON_HOLD'] },
   { key: 'DONE', label: 'Completed', statuses: ['COMPLETED'] },
   { key: 'CANCELLED', label: 'Cancelled', statuses: ['CANCELLED'] },
 ];
@@ -1164,9 +1165,11 @@ function JobDetail({ id, onBack, can, onNotice }: { id: string; onBack: () => vo
   const amountPaid = invoice?.amount_paid_minor ?? 0;
   const balance = Math.max(0, total - amountPaid);
 
-  const nextStep = transitions.find((s) => s !== 'CANCELLED');
+  const nextStep = transitions.find((s) => s !== 'CANCELLED' && s !== 'ON_HOLD');
   const canAdvance = !!nextStep && can(nextStep === 'COMPLETED' ? 'job.complete' : 'job.update');
   const canCancel = transitions.includes('CANCELLED') && can('job.update');
+  const canHold = transitions.includes('ON_HOLD') && can('job.update');
+  const canResume = job.status === 'ON_HOLD' && can('job.update');
   const currentStepIdx = WORK_ORDER_STEPS.indexOf(job.status as typeof WORK_ORDER_STEPS[number]);
 
   return <>
@@ -1174,12 +1177,14 @@ function JobDetail({ id, onBack, can, onNotice }: { id: string; onBack: () => vo
     <div className="detail-header">
       <div className="detail-avatar job"><Wrench size={24} /></div>
       <div className="flex-1"><h2>{job.job_number}</h2><p className="muted">{formatDate(job.created_at)}</p></div>
-      {job.status === 'CANCELLED' && <span className={`status ${statusStyles[job.status] ?? ''}`}>Cancelled</span>}
+      {(job.status === 'CANCELLED' || job.status === 'ON_HOLD') && <span className={`status ${statusStyles[job.status] ?? ''}`}>{job.status === 'CANCELLED' ? 'Cancelled' : 'On hold'}</span>}
       {job.status !== 'CANCELLED' && balance > 0 && <span className="status bg-red-50 text-red-700">Owes {formatKes(balance)}</span>}
     </div>
 
     {job.status === 'CANCELLED' ? (
       <div className="wod-cancelled-banner"><Ban size={18} /> This work order was cancelled.</div>
+    ) : job.status === 'ON_HOLD' ? (
+      <div className="wod-onhold-banner"><Clock size={18} /> This work order is on hold — the vehicle is in the garage, but nothing is currently being done to it.</div>
     ) : (
       <div className="wod-progress">
         {WORK_ORDER_STEPS.map((s, i) => {
@@ -1197,8 +1202,10 @@ function JobDetail({ id, onBack, can, onNotice }: { id: string; onBack: () => vo
       </div>
     )}
 
-    {(canAdvance || canCancel) && <div className="wod-progress-actions">
+    {(canAdvance || canHold || canResume || canCancel) && <div className="wod-progress-actions">
       {canAdvance && nextStep && <button className="button primary" onClick={() => void changeStatus(nextStep)}>{WORK_ORDER_NEXT_STEP_CTA[job.status]}</button>}
+      {canResume && <button className="button primary" onClick={() => void changeStatus('IN_PROGRESS')}>Resume work</button>}
+      {canHold && <button className="button secondary" onClick={() => void changeStatus('ON_HOLD')}><Clock size={15} /> Put on hold</button>}
       {canCancel && <button className="button secondary wod-cancel-btn" onClick={() => void changeStatus('CANCELLED')}><Ban size={15} /> Cancel job</button>}
     </div>}
 

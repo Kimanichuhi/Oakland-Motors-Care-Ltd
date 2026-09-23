@@ -109,6 +109,7 @@ button { cursor:pointer; }
 .wod-cancel-btn { color:#a4493d; border-color:#f0d9d5; }
 .wod-cancel-btn:hover { background:#fff0ee; }
 .wod-cancelled-banner { display:flex; align-items:center; gap:10px; margin:22px 0; padding:14px 16px; background:#fff0ee; border:1px solid #f6d6d0; border-radius:10px; color:#a4493d; font-weight:700; font-size:13px; }
+.wod-onhold-banner { display:flex; align-items:center; gap:10px; margin:22px 0; padding:14px 16px; background:#fdf3e3; border:1px solid #f0dfc0; border-radius:10px; color:#96692a; font-weight:700; font-size:13px; }
 
 /* Slightly larger type on big screens — most of the UI sets an explicit px size per
    element rather than scaling off a root rem value, so the bump is applied directly

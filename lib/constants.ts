@@ -21,14 +21,15 @@ export const ROLE_LABELS: Record<string, string> = {
   MANAGER: 'Garage Manager',
 };
 
-export const JOB_STATUSES = ['DRAFT','OPEN','IN_PROGRESS','COMPLETED','CANCELLED'] as const;
+export const JOB_STATUSES = ['DRAFT','OPEN','IN_PROGRESS','ON_HOLD','COMPLETED','CANCELLED'] as const;
 
 // Mirrors transition_job_status() in
-// supabase/migrations/20260910090000_202609100001_oakland_job_card_status_simplify.sql exactly.
+// supabase/migrations/20261015090000_202610150001_oakland_job_card_on_hold.sql exactly.
 export const JOB_TRANSITIONS: Record<string, string[]> = {
   DRAFT: ['OPEN','CANCELLED'],
-  OPEN: ['IN_PROGRESS','CANCELLED'],
-  IN_PROGRESS: ['COMPLETED','CANCELLED'],
+  OPEN: ['IN_PROGRESS','ON_HOLD','CANCELLED'],
+  IN_PROGRESS: ['COMPLETED','ON_HOLD','CANCELLED'],
+  ON_HOLD: ['IN_PROGRESS','CANCELLED'],
   COMPLETED: [],
   CANCELLED: [],
 };
@@ -170,6 +171,7 @@ export const statusStyles: Record<string, string> = {
   RETURNED: 'bg-sky-50 text-sky-700',
   VOIDED: 'bg-slate-100 text-slate-500',
   OPEN: 'bg-emerald-50 text-emerald-700',
+  ON_HOLD: 'bg-amber-50 text-amber-700',
   CLEARANCE: 'bg-amber-50 text-amber-700',
   OPENING: 'bg-sky-50 text-sky-700',
   CORRECTION_INCREASE: 'bg-emerald-50 text-emerald-700',

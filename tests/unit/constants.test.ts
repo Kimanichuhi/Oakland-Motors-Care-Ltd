@@ -2,12 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { JOB_TRANSITIONS, JOB_STATUSES } from '@/lib/constants';
 
 // This mirrors transition_job_status() in
-// supabase/migrations/20260910090000_202609100001_oakland_job_card_status_simplify.sql exactly.
+// supabase/migrations/20261015090000_202610150001_oakland_job_card_on_hold.sql exactly.
 // If this test ever fails, the client-side and database-side state machines have drifted.
 const EXPECTED_TRANSITIONS: Record<string, string[]> = {
   DRAFT: ['OPEN', 'CANCELLED'],
-  OPEN: ['IN_PROGRESS', 'CANCELLED'],
-  IN_PROGRESS: ['COMPLETED', 'CANCELLED'],
+  OPEN: ['IN_PROGRESS', 'ON_HOLD', 'CANCELLED'],
+  IN_PROGRESS: ['COMPLETED', 'ON_HOLD', 'CANCELLED'],
+  ON_HOLD: ['IN_PROGRESS', 'CANCELLED'],
   COMPLETED: [],
   CANCELLED: [],
 };
