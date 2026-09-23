@@ -103,9 +103,9 @@ export default function ScrapDailyDetail({ date, can, isAdmin, onBack, onNotice,
           <div className="panel-heading"><div><p className="eyebrow">Breakdown</p><h3>Expenses</h3></div></div>
           {expenses.length === 0 ? <div className="empty"><strong>No expenses</strong></div> : <div className="data-table">
             {expenses.map((e) => <div className="table-row" key={e.id}>
-              <div><strong>{e.category}</strong>{e.description && <span>{e.description}</span>}</div>
-              <span className="table-muted">{formatKes(e.amount_minor)}</span>
-              {can('scrap.manage') && <button className="button secondary small" disabled={busyId === e.id} onClick={() => setVoidTarget({ kind: 'expense', id: e.id, label: `${e.category} expense` })}><Ban size={13} /> Void</button>}
+              <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}><strong>{e.category}</strong>{e.description && <span>{e.description}</span>}</div>
+              <span className="table-muted" style={{ flexShrink: 0 }}>{formatKes(e.amount_minor)}</span>
+              {can('scrap.manage') && <button className="button secondary small" style={{ flexShrink: 0 }} disabled={busyId === e.id} onClick={() => setVoidTarget({ kind: 'expense', id: e.id, label: `${e.category} expense` })}><Ban size={13} /> Void</button>}
             </div>)}
           </div>}
         </section>
@@ -116,9 +116,9 @@ export default function ScrapDailyDetail({ date, can, isAdmin, onBack, onNotice,
         <div className="data-table">
           {cashTx.map((t) => (
             <div className="table-row" key={t.id}>
-              <div><strong>{t.transaction_type === 'CASH_ADDED' ? 'Cash added' : 'Adjustment'}</strong><span>{t.added_by ? `By ${t.added_by} · ` : ''}{t.reason ?? ''}</span></div>
-              <span className="table-muted">{formatKes(t.amount_minor)}</span>
-              {can('scrap.manage') && <button className="button secondary small" disabled={busyId === t.id} onClick={() => setVoidTarget({ kind: 'cash', id: t.id, label: t.transaction_type === 'CASH_ADDED' ? 'Cash added entry' : 'Cash adjustment' })}><Ban size={13} /> Void</button>}
+              <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}><strong>{t.transaction_type === 'CASH_ADDED' ? 'Cash added' : 'Adjustment'}</strong><span>{t.added_by ? `By ${t.added_by} · ` : ''}{t.reason ?? ''}</span></div>
+              <span className="table-muted" style={{ flexShrink: 0 }}>{formatKes(t.amount_minor)}</span>
+              {can('scrap.manage') && <button className="button secondary small" style={{ flexShrink: 0 }} disabled={busyId === t.id} onClick={() => setVoidTarget({ kind: 'cash', id: t.id, label: t.transaction_type === 'CASH_ADDED' ? 'Cash added entry' : 'Cash adjustment' })}><Ban size={13} /> Void</button>}
             </div>
           ))}
         </div>
