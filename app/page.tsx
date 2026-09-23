@@ -471,7 +471,7 @@ function SectionRouter(props: SectionProps) {
     case 'quotations': return p.selectedQuotationId ? <QuotationDetail id={p.selectedQuotationId} onBack={() => p.setSelectedQuotationId(null)} can={p.can} onNotice={p.onNotice} /> : <QuotationsSection onNew={() => p.setShowQuotationForm(true)} onSelect={(id) => p.setSelectedQuotationId(id)} can={p.can} />;
     case 'invoices': return p.selectedInvoiceId ? <InvoiceDetail id={p.selectedInvoiceId} onBack={() => p.setSelectedInvoiceId(null)} onPayment={() => p.setShowPaymentForm(true)} can={p.can} onNotice={p.onNotice} /> : <InvoicesSection query={p.query} onNew={() => p.setShowInvoiceForm(true)} onSelect={(id) => p.setSelectedInvoiceId(id)} can={p.can} />;
     case 'scrapdashboard': return <ScrapDashboardPage can={p.can} onNotice={p.onNotice} onNavigateToStock={() => p.setSection('scrapstock')} />;
-    case 'scraprecords': return <ScrapRecordsPage can={p.can} onNotice={p.onNotice} />;
+    case 'scraprecords': return <ScrapRecordsPage can={p.can} onNotice={p.onNotice} isAdmin={p.userPerms.role === 'ADMIN'} />;
     case 'scrapstock': return <ScrapStockPage can={p.can} onNotice={p.onNotice} />;
     case 'scrapreconciliation': return <ScrapReconciliationPage can={p.can} onNotice={p.onNotice} />;
     case 'scrapfinances': return <ScrapFinancesPage />;

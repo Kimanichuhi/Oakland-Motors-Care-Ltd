@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { ScrapCashSummary, ScrapPurchase, ScrapCurrentStockRow, StockCycle, ScrapStockAdjustment, ScrapItem, ScrapClearanceSale } from '@/lib/types';
 import { formatKes, formatKg, formatDate, localDateStr } from '@/lib/formatting';
-import { statusStyles } from '@/lib/constants';
-import { CalendarDays, Boxes, RotateCcw, PackageMinus } from 'lucide-react';
+import { statusStyles, byScrapTypeOrder } from '@/lib/constants';
+import { CalendarDays, Boxes, RotateCcw, PackageMinus, Wallet, CircleDollarSign } from 'lucide-react';
 import { ReconciliationReceiptView } from './ScrapStockTab';
 
 type ReportId = 'monthly' | 'daily' | 'stock' | 'cycles' | 'clearances';
@@ -37,9 +37,19 @@ export default function ScrapReports() {
   );
 }
 
+function stockValue(quantities: Map<string, number>, items: ScrapItem[]): number {
+  const rateByItem = new Map(items.map((i) => [i.id, i.current_rate_minor ?? 0]));
+  let total = 0;
+  quantities.forEach((qty, itemId) => { total += qty * (rateByItem.get(itemId) ?? 0); });
+  return total;
+}
+
 function MonthlyReport() {
   const [month, setMonth] = useState(monthInput());
   const [days, setDays] = useState<ScrapCashSummary[]>([]);
+  const [items, setItems] = useState<ScrapItem[]>([]);
+  const [purchasedByItem, setPurchasedByItem] = useState<Map<string, number>>(new Map());
+  const [adjustedByItem, setAdjustedByItem] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -48,10 +58,34 @@ function MonthlyReport() {
       setLoading(true);
       const [y, m] = month.split('-').map(Number);
       const start = `${month}-01`;
-      const end = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
-      const { data } = await supabase.from('scrap_cash_summary').select('*').gte('date', start).lte('date', end).order('date');
+      const monthEnd = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+      const today = localDateStr();
+      const end = monthEnd < today ? monthEnd : today;
+
+      const [{ data: dayRows }, { data: itemRows }, { data: purchases }, { data: adjustments }] = await Promise.all([
+        supabase.from('scrap_cash_summary').select('*').gte('date', start).lte('date', end).order('date'),
+        supabase.from('scrap_items').select('*'),
+        supabase.from('scrap_purchases').select('scrap_item_id, quantity_purchased').eq('status', 'ACTIVE').gte('date', start).lte('date', end),
+        supabase.from('scrap_stock_adjustments').select('scrap_item_id, adjustment_type, quantity').gte('date', start).lte('date', end),
+      ]);
       if (!mounted) return;
-      setDays((data ?? []) as ScrapCashSummary[]);
+
+      setDays((dayRows ?? []) as ScrapCashSummary[]);
+      setItems(((itemRows ?? []) as ScrapItem[]).sort(byScrapTypeOrder));
+
+      const purchasedMap = new Map<string, number>();
+      for (const p of (purchases ?? []) as { scrap_item_id: string; quantity_purchased: number }[]) {
+        purchasedMap.set(p.scrap_item_id, (purchasedMap.get(p.scrap_item_id) ?? 0) + p.quantity_purchased);
+      }
+      setPurchasedByItem(purchasedMap);
+
+      const adjustedMap = new Map<string, number>();
+      for (const a of (adjustments ?? []) as { scrap_item_id: string; adjustment_type: string; quantity: number }[]) {
+        const signed = a.adjustment_type === 'CLEARANCE' || a.adjustment_type === 'CORRECTION_DECREASE' ? -a.quantity : a.quantity;
+        adjustedMap.set(a.scrap_item_id, (adjustedMap.get(a.scrap_item_id) ?? 0) + signed);
+      }
+      setAdjustedByItem(adjustedMap);
+
       setLoading(false);
     }
     void load();
@@ -63,8 +97,25 @@ function MonthlyReport() {
     purchases: acc.purchases + d.purchases_minor,
     cashAdded: acc.cashAdded + d.cash_added_minor,
     expenses: acc.expenses + d.expenses_minor,
-  }), { kg: 0, purchases: 0, cashAdded: 0, expenses: 0 });
-  const endingCash = days.length > 0 ? days[days.length - 1].closing_cash_minor : null;
+    adjustments: acc.adjustments + d.adjustments_minor,
+  }), { kg: 0, purchases: 0, cashAdded: 0, expenses: 0, adjustments: 0 });
+
+  // Every figure below is this month's own activity only, starting from a
+  // zero baseline — not the real running cash/stock balance carried from
+  // prior months. The actual cash-in-hand figure (which does carry forward)
+  // is still available on Daily Records / the yard Overview.
+  const netCashThisMonth = totals.cashAdded + totals.adjustments - totals.purchases - totals.expenses;
+
+  const netStockByItem = new Map<string, number>();
+  items.forEach((i) => {
+    const net = (purchasedByItem.get(i.id) ?? 0) + (adjustedByItem.get(i.id) ?? 0);
+    if (net !== 0) netStockByItem.set(i.id, net);
+  });
+  const netStockValue = stockValue(netStockByItem, items);
+  const netCapitalThisMonth = netCashThisMonth + netStockValue;
+
+  const actualClosingCash = days.length > 0 ? days[days.length - 1].closing_cash_minor : null;
+  const stockRows = items.filter((i) => (purchasedByItem.get(i.id) ?? 0) !== 0 || (adjustedByItem.get(i.id) ?? 0) !== 0);
 
   return (
     <>
@@ -72,20 +123,52 @@ function MonthlyReport() {
         <div><p className="eyebrow">Monthly report</p><h1 style={{ fontSize: 24 }}>Monthly scrap &amp; cash report</h1></div>
         <div className="heading-actions"><label><input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></label></div>
       </div>
-      {loading ? <div className="empty"><strong>Loading…</strong></div> : days.length === 0 ? <div className="empty"><strong>No records for this month</strong></div> : (
+      {loading ? <div className="empty"><strong>Loading…</strong></div> : (
         <>
-          <div className="panel"><div className="data-table">
-            {days.map((d) => (
-              <div className="table-row" key={d.date}>
-                <div><strong>{formatDate(d.date)}</strong></div>
-                <span className="table-muted">{formatKg(d.total_kg_purchased)}</span>
-                <span className="table-muted">{formatKes(d.purchases_minor)}</span>
-                <span className="table-muted">Added {formatKes(d.cash_added_minor)}</span>
-                <span className="table-muted">Exp {formatKes(d.expenses_minor)}</span>
-                <span className="table-muted">{formatKes(d.closing_cash_minor)}</span>
-              </div>
-            ))}
-          </div></div>
+          <section className="panel" style={{ marginBottom: 20 }}>
+            <div className="panel-heading"><div><p className="eyebrow">This month only — starts from zero, not a running balance</p><h3>Capital result</h3></div></div>
+            <div className="detail-info-grid" style={{ gridTemplateColumns: 'repeat(2, minmax(0,1fr))' }}>
+              <div className="info-card"><Wallet size={16} /><div><span>Net cash movement</span><strong>{formatKes(netCashThisMonth)}</strong></div></div>
+              <div className="info-card"><Boxes size={16} /><div><span>Net stock value added</span><strong>{formatKes(netStockValue)}</strong></div></div>
+            </div>
+            <div className="status-row" style={{ marginTop: 10 }}><strong>Capital this month</strong><span style={{ fontWeight: 800, color: netCapitalThisMonth < 0 ? '#a4493d' : netCapitalThisMonth > 0 ? '#2a805d' : undefined }}>{netCapitalThisMonth > 0 ? '+' : ''}{formatKes(netCapitalThisMonth)}</span></div>
+            <p className="muted" style={{ marginTop: 10, marginBottom: 0, fontSize: 12 }}>Stock value uses each scrap type&apos;s current rate, not necessarily the rate that applied when it was actually bought, if it&apos;s changed since.</p>
+          </section>
+
+          {days.length === 0 ? <div className="empty"><strong>No cash activity recorded this month</strong></div> : (
+            <div className="panel"><div className="data-table">
+              {days.map((d) => (
+                <div className="table-row" key={d.date}>
+                  <div><strong>{formatDate(d.date)}</strong></div>
+                  <span className="table-muted">{formatKg(d.total_kg_purchased)}</span>
+                  <span className="table-muted">{formatKes(d.purchases_minor)}</span>
+                  <span className="table-muted">Added {formatKes(d.cash_added_minor)}</span>
+                  <span className="table-muted">Exp {formatKes(d.expenses_minor)}</span>
+                  <span className="table-muted">{formatKes(d.closing_cash_minor)}</span>
+                </div>
+              ))}
+            </div></div>
+          )}
+
+          <section className="panel" style={{ marginTop: 20 }}>
+            <div className="panel-heading"><div><p className="eyebrow">Movement</p><h3>Stock by type this month</h3></div></div>
+            {stockRows.length === 0 ? <div className="empty"><strong>No stock activity this month</strong></div> : (
+              <div className="report-table-wrap"><table className="report-table">
+                <thead><tr><th>Scrap Type</th><th className="numeric">Purchased KG</th><th className="numeric">Cleared / Adjusted KG</th><th className="numeric">Net KG</th></tr></thead>
+                <tbody>{stockRows.map((i) => {
+                  const purchased = purchasedByItem.get(i.id) ?? 0;
+                  const adjusted = adjustedByItem.get(i.id) ?? 0;
+                  return <tr key={i.id}>
+                    <td>{i.name}</td>
+                    <td className="numeric">{formatKg(purchased)}</td>
+                    <td className="numeric">{adjusted === 0 ? '—' : `${adjusted > 0 ? '+' : ''}${formatKg(adjusted)}`}</td>
+                    <td className="numeric">{formatKg(purchased + adjusted)}</td>
+                  </tr>;
+                })}</tbody>
+              </table></div>
+            )}
+          </section>
+
           <div className="dashboard-grid" style={{ marginTop: 20 }}>
             <section className="panel">
               <div className="panel-heading"><div><p className="eyebrow">Flow metrics (this month)</p><h3>Activity totals</h3></div></div>
@@ -95,9 +178,9 @@ function MonthlyReport() {
               <div className="status-row"><strong>Total expenses</strong><span>{formatKes(totals.expenses)}</span></div>
             </section>
             <section className="panel">
-              <div className="panel-heading"><div><p className="eyebrow">Balance metric (point in time)</p><h3>Ending cash</h3></div></div>
-              <p className="muted">This is the closing balance on the last recorded day of the month — not a sum of daily closing balances.</p>
-              <div className="status-row"><strong>Ending cash balance</strong><span style={{ fontWeight: 800 }}>{endingCash !== null ? formatKes(endingCash) : '—'}</span></div>
+              <div className="panel-heading"><div><p className="eyebrow">Reference only — real running balance, all-time</p><h3>Actual cash in hand</h3></div></div>
+              <p className="muted">Unlike everything above, this is the true cash-in-hand figure carried forward from every prior month — not zero-based. It&apos;s the closing balance on the last recorded day of this month.</p>
+              <div className="status-row"><strong>Actual closing cash</strong><span style={{ fontWeight: 800 }}><CircleDollarSign size={14} style={{ verticalAlign: -2 }} /> {actualClosingCash !== null ? formatKes(actualClosingCash) : '—'}</span></div>
             </section>
           </div>
         </>

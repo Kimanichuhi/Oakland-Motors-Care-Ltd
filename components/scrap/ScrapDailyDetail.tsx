@@ -3,12 +3,13 @@ import { toPng } from 'html-to-image';
 import { supabase } from '@/lib/supabase';
 import type { ScrapPurchase, ScrapExpense, CashTransaction, ScrapCashSummary } from '@/lib/types';
 import { formatKes, formatKg, formatDate } from '@/lib/formatting';
-import { ChevronRight, Printer, Download, Ban, AlertTriangle, X } from 'lucide-react';
+import { ChevronRight, Printer, Download, Ban, Pencil, AlertTriangle, X } from 'lucide-react';
+import EditDailyRecordDialog from './EditDailyRecord';
 
-type PurchaseWithItem = ScrapPurchase & { scrap_items: { name: string } | null };
+export type PurchaseWithItem = ScrapPurchase & { scrap_items: { name: string } | null };
 
-export default function ScrapDailyDetail({ date, can, onBack, onNotice, onRefresh }: {
-  date: string; can: (p: string) => boolean; onBack: () => void; onNotice: (m: string) => void; onRefresh: () => void;
+export default function ScrapDailyDetail({ date, can, isAdmin, onBack, onNotice, onRefresh }: {
+  date: string; can: (p: string) => boolean; isAdmin: boolean; onBack: () => void; onNotice: (m: string) => void; onRefresh: () => void;
 }) {
   const [summary, setSummary] = useState<ScrapCashSummary | null>(null);
   const [purchases, setPurchases] = useState<PurchaseWithItem[]>([]);
@@ -18,6 +19,7 @@ export default function ScrapDailyDetail({ date, can, onBack, onNotice, onRefres
   const [showPrint, setShowPrint] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [voidTarget, setVoidTarget] = useState<{ kind: 'purchase' | 'expense' | 'cash'; id: string; label: string } | null>(null);
+  const [showEdit, setShowEdit] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -123,11 +125,13 @@ export default function ScrapDailyDetail({ date, can, onBack, onNotice, onRefres
       </section>}
 
       <div className="action-buttons" style={{ marginTop: 20 }}>
+        {can('scrap.manage') && <button className="button primary" onClick={() => setShowEdit(true)}><Pencil size={16} /> Edit day</button>}
         <button className="button secondary" onClick={() => setShowPrint(true)}><Printer size={16} /> Print / Save as PDF</button>
       </div>
 
       {showPrint && <ScrapDailyPrintView date={date} summary={summary} purchases={purchases} expenses={expenses} cashTx={cashTx} onClose={() => setShowPrint(false)} onNotice={onNotice} />}
       {voidTarget && <VoidReasonModal label={voidTarget.label} busy={busyId === voidTarget.id} onCancel={() => setVoidTarget(null)} onConfirm={(reason) => void confirmVoid(reason)} />}
+      {showEdit && <EditDailyRecordDialog date={date} can={can} isAdmin={isAdmin} purchases={purchases} expenses={expenses} cashTx={cashTx} onClose={() => setShowEdit(false)} onSaved={(m) => { onNotice(m); setShowEdit(false); onRefresh(); void load(); }} />}
     </div>
   );
 }

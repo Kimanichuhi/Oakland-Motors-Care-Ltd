@@ -69,6 +69,27 @@ export function downloadCSV(filename: string, rows: Record<string, unknown>[]) {
   URL.revokeObjectURL(url);
 }
 
+/** Genuine .xlsx (not a renamed CSV) — one sheet per entry, empty sheets skipped.
+ * exceljs is loaded on demand since it's a heavy dependency only needed when
+ * someone actually clicks an Excel export button. */
+export async function downloadXLSX(filename: string, sheets: { name: string; rows: Record<string, unknown>[] }[]) {
+  const nonEmpty = sheets.filter((s) => s.rows.length > 0);
+  if (nonEmpty.length === 0) return;
+  const ExcelJS = (await import('exceljs')).default;
+  const workbook = new ExcelJS.Workbook();
+  for (const { name, rows } of nonEmpty) {
+    const sheet = workbook.addWorksheet(name);
+    const headers = Object.keys(rows[0]);
+    sheet.columns = headers.map((h) => ({ header: h, key: h, width: Math.max(12, h.length + 2) }));
+    sheet.addRows(rows);
+  }
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function formatDate(date: string | Date | null): string {
   if (!date) return '—';
   return new Date(date).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' });

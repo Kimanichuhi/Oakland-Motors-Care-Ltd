@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase';
 import type { ScrapItem } from '@/lib/types';
 import { formatKes } from '@/lib/formatting';
 import { byScrapTypeOrder } from '@/lib/constants';
-import { Plus, Pencil, Check, X, Ban, AlertTriangle } from 'lucide-react';
+import { Plus, Pencil, Check, X, Ban, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 
 export default function ScrapTypesPage({ can, onNotice }: { can: (p: string) => boolean; onNotice: (m: string) => void }) {
   const canManage = can('scrap.manage');
@@ -72,6 +72,16 @@ export default function ScrapTypesPage({ can, onNotice }: { can: (p: string) => 
     onNotice(item.active ? `${item.name} deactivated.` : `${item.name} activated.`);
   }
 
+  async function togglePurchaseVisibility(item: ScrapItem) {
+    setBusy(true);
+    setError('');
+    const { error: err } = await supabase.rpc('scrap_set_item_purchase_visibility', { p_id: item.id, p_visible: !item.show_in_purchase_form });
+    setBusy(false);
+    if (err) { setError(err.message); return; }
+    refresh();
+    onNotice(item.show_in_purchase_form ? `${item.name} hidden from the Add Purchase dialog.` : `${item.name} will now show in the Add Purchase dialog.`);
+  }
+
   async function addItem(e: React.FormEvent) {
     e.preventDefault();
     setError('');
@@ -121,8 +131,10 @@ export default function ScrapTypesPage({ can, onNotice }: { can: (p: string) => 
                       <span>{item.current_rate_minor === null ? 'Rate not set' : `${formatKes(item.current_rate_minor)} / kg`}</span>
                     </div>
                     <span className={`status ${item.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{item.active ? 'Active' : 'Inactive'}</span>
+                    <span className={`status ${item.show_in_purchase_form ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>{item.show_in_purchase_form ? 'In purchase dialog' : 'Hidden from purchase dialog'}</span>
                     {canManage && <>
                       <button className="close-button" style={{ width: 28, height: 28 }} title="Edit" onClick={() => startEdit(item)}><Pencil size={14} /></button>
+                      <button className="close-button" style={{ width: 28, height: 28 }} title={item.show_in_purchase_form ? 'Hide from Add Purchase dialog' : 'Show in Add Purchase dialog'} disabled={busy} onClick={() => void togglePurchaseVisibility(item)}>{item.show_in_purchase_form ? <Eye size={14} /> : <EyeOff size={14} />}</button>
                       <button className="close-button" style={{ width: 28, height: 28 }} title={item.active ? 'Deactivate' : 'Activate'} onClick={() => void toggleActive(item)}><Ban size={14} /></button>
                     </>}
                   </>

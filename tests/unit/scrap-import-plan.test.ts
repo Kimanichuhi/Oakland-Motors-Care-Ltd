@@ -5,7 +5,7 @@ import { parseScrapBulkCSV, planScrapRows } from '@/lib/scrapImport';
 import type { ScrapItem } from '@/lib/types';
 
 function item(overrides: Partial<ScrapItem> = {}): ScrapItem {
-  return { id: 'cast-id', name: 'Cast', current_rate_minor: 100000, active: true, created_at: '', updated_at: '', ...overrides };
+  return { id: 'cast-id', name: 'Cast', current_rate_minor: 100000, active: true, show_in_purchase_form: true, created_at: '', updated_at: '', ...overrides };
 }
 
 describe('parseScrapBulkCSV', () => {
@@ -161,7 +161,7 @@ describe('planScrapRows against the real historical scrap ledger import', () => 
     ['Battery 4', 6000], ['Cast', 4000], ['Cast 2', 3500], ['Alu Hard', 13000], ['Alu Hard 2', 15000],
     ['Soft', 20000], ['Plastic', 2000], ['Brass', 40000], ['Gumboots', 5000], ['Radiator', 20000],
     ['Radiator Brass', 20000],
-  ].map(([name, rate], i) => ({ id: `id-${i}`, name: name as string, current_rate_minor: rate as number, active: true, created_at: '', updated_at: '' }));
+  ].map(([name, rate], i) => ({ id: `id-${i}`, name: name as string, current_rate_minor: rate as number, active: true, show_in_purchase_form: true, created_at: '', updated_at: '' }));
 
   it('plans every row cleanly, with no ERROR rows', () => {
     const csvPath = join(__dirname, '../../Scrap_Daily_Records_ready_to_import.csv');

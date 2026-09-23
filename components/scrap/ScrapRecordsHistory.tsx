@@ -2,15 +2,15 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { toPng } from 'html-to-image';
 import { supabase } from '@/lib/supabase';
 import type { ScrapCashSummary, ScrapItem, ScrapPurchase, ScrapExpense } from '@/lib/types';
-import { formatKes, formatKg, formatDate } from '@/lib/formatting';
+import { formatKes, formatKg, formatDate, downloadXLSX } from '@/lib/formatting';
 import { byScrapTypeOrder } from '@/lib/constants';
-import { Search, ChevronRight, Calendar, Printer, Download, Upload } from 'lucide-react';
+import { Search, ChevronRight, Calendar, Printer, Download, Upload, FileSpreadsheet } from 'lucide-react';
 import ScrapDailyDetail from './ScrapDailyDetail';
 import BulkScrapUploadDialog from './BulkScrapUpload';
 import ListPagination, { PAGE_SIZE } from '@/components/ui/ListPagination';
 
-export default function ScrapRecordsHistory({ can, onNotice, onRefresh, refreshKey }: {
-  can: (p: string) => boolean; onNotice: (m: string) => void; onRefresh: () => void; refreshKey: number;
+export default function ScrapRecordsHistory({ can, onNotice, onRefresh, refreshKey, isAdmin }: {
+  can: (p: string) => boolean; onNotice: (m: string) => void; onRefresh: () => void; refreshKey: number; isAdmin: boolean;
 }) {
   const [days, setDays] = useState<ScrapCashSummary[]>([]);
   const [total, setTotal] = useState(0);
@@ -54,7 +54,7 @@ export default function ScrapRecordsHistory({ can, onNotice, onRefresh, refreshK
   }, [days, query]);
 
   if (selectedDate) {
-    return <ScrapDailyDetail date={selectedDate} can={can} onBack={() => setSelectedDate(null)} onNotice={onNotice} onRefresh={onRefresh} />;
+    return <ScrapDailyDetail date={selectedDate} can={can} isAdmin={isAdmin} onBack={() => setSelectedDate(null)} onNotice={onNotice} onRefresh={onRefresh} />;
   }
 
   return (
@@ -106,6 +106,7 @@ function ScrapRecordsPrintView({ fromDate, toDate, scrapItemId, scrapItemName, o
 }) {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
   const [purchases, setPurchases] = useState<(ScrapPurchase & { scrap_items: { name: string } | null })[]>([]);
   const [expenses, setExpenses] = useState<ScrapExpense[]>([]);
   const [days, setDays] = useState<ScrapCashSummary[]>([]);
@@ -177,6 +178,35 @@ function ScrapRecordsPrintView({ fromDate, toDate, scrapItemId, scrapItemName, o
     setExporting(false);
   }
 
+  async function exportExcel() {
+    setExportingExcel(true);
+    try {
+      await downloadXLSX(`scrap-daily-records-${fromDate || 'all'}-to-${toDate || 'all'}.xlsx`, [
+        {
+          name: 'Purchases',
+          rows: purchases.map((p) => ({
+            Date: formatDate(p.date), 'Scrap Type': p.scrap_items?.name ?? '', 'Rate/kg (KES)': p.rate_used_minor / 100,
+            'Weight (KG)': p.quantity_purchased, 'Amount (KES)': p.purchase_amount_minor / 100,
+          })),
+        },
+        {
+          name: 'Expenses',
+          rows: expenses.map((e) => ({ Date: formatDate(e.date), Category: e.category, 'Amount (KES)': e.amount_minor / 100, Notes: e.description ?? '' })),
+        },
+        {
+          name: 'Cash Position',
+          rows: days.map((d) => ({
+            Date: formatDate(d.date), 'Cash Added (KES)': d.cash_added_minor / 100, 'Purchases (KES)': d.purchases_minor / 100,
+            'Expenses (KES)': d.expenses_minor / 100, 'Closing Cash (KES)': d.closing_cash_minor / 100, Discrepancy: d.has_discrepancy ? 'Yes' : 'No',
+          })),
+        },
+      ]);
+    } catch {
+      onNotice('Unable to export the daily records as Excel. Please try again.');
+    }
+    setExportingExcel(false);
+  }
+
   return (
     <div className="print-overlay">
       <div className="print-toolbar no-print">
@@ -184,6 +214,7 @@ function ScrapRecordsPrintView({ fromDate, toDate, scrapItemId, scrapItemName, o
         <div className="action-buttons">
           <button className="button primary small" disabled={loading} onClick={() => window.print()}><Printer size={15} /> Print / Save as PDF</button>
           <button className="button secondary small" disabled={loading || exporting} onClick={() => void exportImage()}><Download size={15} /> {exporting ? 'Exporting…' : 'Export as image'}</button>
+          <button className="button secondary small" disabled={loading || exportingExcel} onClick={() => void exportExcel()}><FileSpreadsheet size={15} /> {exportingExcel ? 'Exporting…' : 'Export Excel'}</button>
           <button className="close-button" onClick={onClose}>×</button>
         </div>
       </div>

@@ -429,6 +429,7 @@ export type ScrapItem = {
   name: string;
   current_rate_minor: number | null;
   active: boolean;
+  show_in_purchase_form: boolean;
   created_at: string;
   updated_at: string;
 };

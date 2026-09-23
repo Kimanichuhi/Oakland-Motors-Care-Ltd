@@ -44,7 +44,7 @@ export function ScrapPurchaseForm({ resolvedDate, changeInDays, onClose, onSaved
   const [error, setError] = useState('');
   const [pendingForce, setPendingForce] = useState<{ op: Op; message: string } | null>(null);
 
-  useEffect(() => { supabase.from('scrap_items').select('*').eq('active', true).order('name').then(({ data }) => setItems(((data ?? []) as ScrapItem[]).sort(byScrapTypeOrder))); }, []);
+  useEffect(() => { supabase.from('scrap_items').select('*').eq('active', true).eq('show_in_purchase_form', true).order('name').then(({ data }) => setItems(((data ?? []) as ScrapItem[]).sort(byScrapTypeOrder))); }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -175,10 +175,10 @@ export function ScrapPurchaseForm({ resolvedDate, changeInDays, onClose, onSaved
 
           <section className="panel" style={{ marginTop: 4 }}>
             <div className="panel-heading"><div><p className="eyebrow">Today</p><h3>Expenses</h3></div></div>
-            <div className="form-row" style={{ gridTemplateColumns: expenseType === 'Other' ? '1fr 1fr 140px auto' : '1fr 140px auto', alignItems: 'end' }}>
+            <div className="expense-entry-row">
               <label>Type<select value={expenseType} onChange={(e) => setExpenseType(e.target.value)}>{SCRAP_EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}</select></label>
-              {expenseType === 'Other' && <label>Specify<input value={expenseCustomType} onChange={(e) => setExpenseCustomType(e.target.value)} /></label>}
-              <label>Amount (KES)<input type="number" min={0} step="0.01" value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)} /></label>
+              {expenseType === 'Other' && <label>Specify<input value={expenseCustomType} onChange={(e) => setExpenseCustomType(e.target.value)} placeholder="Name this expense" autoFocus /></label>}
+              <label className="expense-entry-amount">Amount (KES)<input type="number" min={0} step="0.01" value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)} /></label>
               <button type="button" className="button secondary" disabled={!(parseFloat(expenseAmount) > 0) || (expenseType === 'Other' && !expenseCustomType.trim())} onClick={addExpenseRow}><Plus size={15} /> Add</button>
             </div>
             {expenseRows.length > 0 && <div className="data-table" style={{ marginTop: 12 }}>{expenseRows.map((r) => {

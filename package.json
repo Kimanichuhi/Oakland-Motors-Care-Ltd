@@ -55,6 +55,7 @@
     "embla-carousel-react": "^8.3.0",
     "eslint": "^9.39.5",
     "eslint-config-next": "16.3.5",
+    "exceljs": "^4.4.0",
     "html-to-image": "^1.11.13",
     "input-otp": "^1.2.4",
     "lucide-react": "^0.446.0",
