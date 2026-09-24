@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 're
 import Image from 'next/image';
 import { toPng } from 'html-to-image';
 import { supabase } from '@/lib/supabase';
-import { formatKes, formatDate, formatDateTime, computeLineTotal, downloadCSV, formatKg, localDateStr, localDayStart, localDayEnd } from '@/lib/formatting';
+import { formatKes, formatDate, formatDateTime, computeLineTotal, downloadCSV, formatKg, localDateStr, localTimeStr, localDayStart, localDayEnd } from '@/lib/formatting';
 import { getTaxRate, clearTaxRateCache } from '@/lib/settings';
 import { purgeRecord, purgeVehicleAndHistory } from '@/lib/purge';
 import { statusStyles, JOB_TRANSITIONS, PAYMENT_METHODS, SALES_PAYMENT_METHODS, SALES_PAYMENT_STATUSES, CUSTOMER_SALE_TYPES, PART_CATEGORIES, JOB_TYPE_META, MOVEMENT_TYPES } from '@/lib/constants';
@@ -3556,6 +3556,23 @@ function VehicleForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: s
   return <Modal title="Add vehicle" onClose={onClose}><form onSubmit={submit} className="modal-form"><label>Customer<select value={customerId} onChange={(e) => setCustomerId(e.target.value)} required><option value="">Select customer...</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.full_name} · {c.phone}</option>)}</select></label><label>Registration number<input value={regNumber} onChange={(e) => setRegNumber(e.target.value)} required placeholder="KDA 123A" /></label><div className="form-row"><label>Make <span className="optional">Optional</span><input value={make} onChange={(e) => setMake(e.target.value)} placeholder="Toyota" /></label><label>Model <span className="optional">Optional</span><input value={model} onChange={(e) => setModel(e.target.value)} placeholder="Hilux" /></label></div><div className="form-row"><label>Year <span className="optional">Optional</span><input type="number" value={year} onChange={(e) => setYear(e.target.value)} placeholder="2020" /></label><label>Mileage <span className="optional">Optional</span><input type="number" value={mileage} onChange={(e) => setMileage(e.target.value)} min="0" /></label></div><label>VIN <span className="optional">Optional</span><input value={vin} onChange={(e) => setVin(e.target.value)} /></label><div className="form-row"><label>Fuel type<input value={fuelType} onChange={(e) => setFuelType(e.target.value)} placeholder="Diesel" /></label><label>Colour<input value={colour} onChange={(e) => setColour(e.target.value)} placeholder="White" /></label></div>{error && <div className="form-error">{error}</div>}<button className="button primary wide" disabled={busy || !customerId || !regNumber.trim()}>{busy ? 'Saving...' : 'Save vehicle'} <ArrowUpRight size={16} /></button></form></Modal>;
 }
 
+// A work order means the car is physically in the garage, so log it in the
+// Vehicle Register automatically instead of making staff re-key the same
+// plate there by hand. Best-effort: skipped if the plate already has an open
+// entry (no time_out yet), and never blocks work order creation if it fails
+// — e.g. the creating role lacks vehicle_register.record.
+async function checkInVehicleRegister(vehicle: Vehicle) {
+  try {
+    const { data: existing } = await supabase.from('vehicle_register').select('id').eq('status', 'ACTIVE').is('time_out', null).ilike('registration_number', vehicle.registration_number).limit(1).maybeSingle();
+    if (existing) return;
+    await supabase.from('vehicle_register').insert({
+      date: localDateStr(), registration_number: vehicle.registration_number,
+      make_model: [vehicle.make, vehicle.model].filter(Boolean).join(' ') || vehicle.registration_number,
+      time_in: localTimeStr(),
+    });
+  } catch { /* best-effort only — a work order was already created successfully */ }
+}
+
 function JobForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: string) => void }) {
   const [customerId, setCustomerId] = useState(''); const [vehicleId, setVehicleId] = useState(''); const [jobType, setJobType] = useState(''); const [customers, setCustomers] = useState<Customer[]>([]); const [vehicles, setVehicles] = useState<Vehicle[]>([]); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   useEffect(() => { supabase.from('customers').select('id,full_name,phone').is('deleted_at', null).order('full_name').limit(200).then(({ data }) => setCustomers((data ?? []) as Customer[])); }, []);
@@ -3565,9 +3582,11 @@ function JobForm({ onClose, onSaved }: { onClose: () => void; onSaved: (m: strin
     const { data: jobNumber, error: numberError } = await supabase.rpc('generate_job_card_number');
     if (numberError || !jobNumber) { setBusy(false); setError('Unable to generate a work order number. Please try again.'); return; }
     const trimmedType = jobType.trim();
-    const { error } = await supabase.from('job_cards').insert({ job_number: jobNumber, customer_id: customerId, vehicle_id: vehicleId, complaint: trimmedType, job_types: trimmedType ? [trimmedType] : [], mileage: vehicles.find((v) => v.id === vehicleId)?.mileage ?? 0 });
+    const selectedVehicle = vehicles.find((v) => v.id === vehicleId);
+    const { error } = await supabase.from('job_cards').insert({ job_number: jobNumber, customer_id: customerId, vehicle_id: vehicleId, complaint: trimmedType, job_types: trimmedType ? [trimmedType] : [], mileage: selectedVehicle?.mileage ?? 0 });
     setBusy(false);
     if (error) { setError(error.message); return; }
+    if (selectedVehicle) void checkInVehicleRegister(selectedVehicle);
     onSaved(`Work order ${jobNumber} created successfully.`);
   }
   return <Modal title="Create work order" onClose={onClose}>
