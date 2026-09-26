@@ -10,9 +10,6 @@ type BeforeInstallPromptEvent = Event & {
 
 type StandaloneNavigator = Navigator & { standalone?: boolean };
 
-const DISMISS_KEY = 'oakland-install-dismissed-at';
-const DISMISS_DAYS = 7;
-
 function isStandalone() {
   return (
     window.matchMedia('(display-mode: standalone)').matches ||
@@ -24,22 +21,16 @@ function isIos() {
   return /iphone|ipad|ipod/i.test(window.navigator.userAgent);
 }
 
-function wasDismissedRecently() {
-  try {
-    const dismissedAt = Number(localStorage.getItem(DISMISS_KEY) ?? 0);
-    return dismissedAt > 0 && Date.now() - dismissedAt < DISMISS_DAYS * 24 * 60 * 60 * 1000;
-  } catch {
-    return false;
-  }
-}
-
+// Not installed yet means the banner keeps coming back — dismiss only clears
+// it for the current page load, not for good, so it reappears on the next
+// visit until the app is actually installed.
 export default function InstallBanner() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [visible, setVisible] = useState(false);
   const [platform, setPlatform] = useState<'installable' | 'ios' | null>(null);
 
   useEffect(() => {
-    if (isStandalone() || wasDismissedRecently()) return;
+    if (isStandalone()) return;
 
     function onBeforeInstallPrompt(e: Event) {
       e.preventDefault();
@@ -67,7 +58,6 @@ export default function InstallBanner() {
   }, []);
 
   function dismiss() {
-    try { localStorage.setItem(DISMISS_KEY, String(Date.now())); } catch { /* private mode: skip persisting */ }
     setVisible(false);
   }
 
