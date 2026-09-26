@@ -289,7 +289,7 @@ export default function Home() {
     items: group.items.filter((item) => can(item.perm)),
   })).filter((group) => group.items.length > 0), [can]);
 
-  if (loading) return <div className="loading-screen"><div className="brand-mark">OM</div><p>Oakland Motor Care Ltd</p></div>;
+  if (loading) return <div className="loading-screen" role="status" aria-live="polite"><Image src="/logo.png" alt="Oakland Motor Care Ltd" className="loader-logo" width={1774} height={887} priority /><div className="loader-bar" aria-hidden="true" /><span className="sr-only">Loading…</span></div>;
   if (!session) return <AuthScreen error={authError} setError={setAuthError} />;
   if (recoveryMode) return <ResetPasswordScreen onDone={() => setRecoveryMode(false)} />;
   if (permsLoaded && userPerms.permissions.length === 0) return <AccountInactiveScreen onSignOut={() => void signOut()} />;
@@ -3536,7 +3536,7 @@ function PoweredByFooter({ className }: { className?: string }) {
   return <a className={`powered-by ${className ?? ''}`} href="https://qeemlabs.co.ke" target="_blank" rel="noopener noreferrer">Created and Powered by Qeem Labs Ltd</a>;
 }
 
-function Loading() { return <div className="empty"><div className="empty-icon"><Activity size={20} /></div><strong>Loading...</strong></div>; }
+function Loading() { return <div className="inline-loader" role="status" aria-live="polite"><Image src="/logo.png" alt="" className="loader-logo small" width={1774} height={887} /><div className="loader-bar" aria-hidden="true" /><span className="sr-only">Loading…</span></div>; }
 function Empty({ title, text }: { title: string; text: string }) { return <div className="empty"><div className="empty-icon"><ClipboardList size={20} /></div><strong>{title}</strong><span>{text}</span></div>; }
 function BackBar({ onBack, label }: { onBack: () => void; label: string }) { return <div className="back-bar"><button onClick={onBack}><ChevronRight size={16} className="back-icon" /> {label}</button></div>; }
 
