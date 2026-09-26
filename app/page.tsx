@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { toPng } from 'html-to-image';
 import { supabase } from '@/lib/supabase';
 import { formatKes, formatDate, formatDateTime, computeLineTotal, downloadCSV, formatKg, localDateStr, localTimeStr, localDayStart, localDayEnd } from '@/lib/formatting';
@@ -3189,6 +3190,10 @@ function SettingsSection({ onNotice, can }: { onNotice: (m: string) => void; can
     </section>
     <section className="panel" style={{ marginTop: 20 }}><div className="panel-heading"><div><p className="eyebrow">Document templates</p><h3>Work order terms &amp; conditions</h3></div></div>
       <label>Printed on every work order <span className="optional">Shown on Customer and Workshop copies</span><textarea value={settings.job_card_terms} onChange={(e) => setSettings({ ...settings, job_card_terms: e.target.value })} style={{ minHeight: 140 }} /></label>
+    </section>
+    <section className="panel" style={{ marginTop: 20 }}><div className="panel-heading"><div><p className="eyebrow">App</p><h3>Install &amp; updates</h3></div></div>
+      <p className="muted" style={{ marginBottom: 14 }}>Install this app on your device, or check for the latest version.</p>
+      <Link href="/install" className="button secondary" target="_blank">Open install &amp; updates page</Link>
     </section>
     {can('settings.manage') && <VehiclePurgePanel onNotice={onNotice} />}
   </>;
