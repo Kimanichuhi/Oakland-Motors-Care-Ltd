@@ -1,14 +1,15 @@
 import React, { useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatKes, formatDate } from '@/lib/formatting';
-import { parseDailySalesCSV, planSalesRows, type ExistingPartForSale, type SalesPlannedRow } from '@/lib/salesImport';
+import { parseDailySalesCSV, planSalesRows, normaliseMpesaCode, type ExistingPartForSale, type SalesPlannedRow } from '@/lib/salesImport';
 import { Upload, Download, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 function downloadSalesTemplate() {
-  const header1 = 'Date,Change in days,Customer Name,Vehicle,Vehicle model,SPARES SALES,,,,,,,Day Total,CASH/MPESA/BANKED,DEBT,JOBCARD NO,REMAINING STOCK AT SHELVES,SYSTEM REMAINING STOCK';
-  const header2 = ',,,,,Part/spare No,Description-& part make,Quantity sold,PRICE,Spares Total,Labour/ Service,TOTAL,,,,,,';
-  const example = '1 Aug 2026,,,,,BP-001,Brake pads,1,850,850,,850,,,,,,';
-  const csv = [header1, header2, example].join('\r\n');
+  const header1 = 'Date,Change in days,Customer Name,Vehicle,Vehicle model,SPARES SALES,,,,,,,Day Total,CASH/MPESA/BANKED,DEBT,JOBCARD NO,REMAINING STOCK AT SHELVES,SYSTEM REMAINING STOCK,MPESA CODE';
+  const header2 = ',,,,,Part/spare No,Description-& part make,Quantity sold,PRICE,Spares Total,Labour/ Service,TOTAL,,,,,,,';
+  const example = '1 Aug 2026,,,,,BP-001,Brake pads,1,850,850,,850,,MPESA,,,,,SHK3XYZ9AB';
+  const cashExample = '1 Aug 2026,,,,,OF-002,Oil filter,1,600,600,,600,,CASH,,,,,';
+  const csv = [header1, header2, example, cashExample].join('\r\n');
   const BOM = String.fromCharCode(0xfeff);
   const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -33,14 +34,17 @@ export default function BulkSalesUploadDialog({ onClose, onSaved, canOverridePri
       const rawRows = parseDailySalesCSV(text);
       if (rawRows.length === 0) { setParseError('No data rows found in this file.'); setParsing(false); return; }
 
-      const [{ data: partRows }, { data: jobCardRows }] = await Promise.all([
+      const [{ data: partRows }, { data: jobCardRows }, { data: saleCodeRows }] = await Promise.all([
         supabase.from('parts').select('id,sku,name,category,selling_price_minor,quantity_on_hand,active'),
         supabase.from('job_cards').select('id,job_number').is('deleted_at', null),
+        supabase.from('sales').select('payment_reference').eq('payment_method', 'MPESA').not('payment_reference', 'is', null),
       ]);
       const parts = (partRows ?? []) as ExistingPartForSale[];
       const jobCardIdByNumber = new Map((((jobCardRows ?? [])) as { id: string; job_number: string }[]).map((j) => [j.job_number.trim().toLowerCase(), j.id]));
 
-      setPlanned(planSalesRows(rawRows, parts, jobCardIdByNumber));
+      const existingMpesaCodes = new Set(((saleCodeRows ?? []) as { payment_reference: string }[]).map((s) => normaliseMpesaCode(s.payment_reference)));
+
+      setPlanned(planSalesRows(rawRows, parts, jobCardIdByNumber, existingMpesaCodes));
     } catch (err) {
       setParseError(err instanceof Error ? err.message : 'Unable to read this file.');
     } finally { setParsing(false); }
@@ -92,7 +96,7 @@ export default function BulkSalesUploadDialog({ onClose, onSaved, canOverridePri
 
         {!planned && !parsing && (
           <div className="modal-form">
-            <p className="muted" style={{ margin: 0 }}>Upload the daily sales day book (one row per part sold). Each row checks the part exists and has enough stock, then records a sale and deducts stock automatically — the same way completing a sale in the app does. Rows with no part on them (day totals, blank spacer rows) are skipped; rows for a part not yet in the Parts module are flagged as errors, not guessed at. Shelf count comes from the file but can be corrected in the preview below; system remaining stock is always computed automatically from actual stock, never editable.</p>
+            <p className="muted" style={{ margin: 0 }}>Upload the daily sales day book (one row per part sold). Each row checks the part exists and has enough stock, then records a sale and deducts stock automatically — the same way completing a sale in the app does. Rows with no part on them (day totals, blank spacer rows) are skipped; rows for a part not yet in the Parts module are flagged as errors, not guessed at. Shelf count comes from the file but can be corrected in the preview below; system remaining stock is always computed automatically from actual stock, never editable. Every M-Pesa sale must have its transaction code in the MPESA CODE column (the last column) — M-Pesa rows without one are flagged as errors.</p>
             {!canOverridePrice && <p className="form-error" style={{ margin: 0 }}><AlertTriangle size={14} /> You don&apos;t have price-override access. Historical sales almost always sell at a different price than the part&apos;s current selling price, which requires it — ask an admin to run this upload, or grant you that permission first.</p>}
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" className="button secondary wide" onClick={downloadSalesTemplate}><Download size={16} /> Download template</button>

@@ -10,7 +10,7 @@ import { formatKes, localDayStart, localDateStr, displayToMinor } from '@/lib/fo
  *   9 Spares Total · 10 Labour/Service · 11 TOTAL · 12 Day Total ·
  *   13 Cash/M-Pesa/Banked · 14 Debt · 15 Jobcard No · 16 Remaining stock at
  *   shelves (manual count) · 17 System remaining stock (informational, computed
- *   by the paper book itself — used here only as a cross-check). */
+ *   by the paper book itself — used here only as a cross-check) · 18 M-Pesa code. */
 export type DailySalesRawRow = {
   rowNumber: number;
   date: string;
@@ -31,6 +31,7 @@ export type DailySalesRawRow = {
   jobCardNo: string;
   shelfCount: string;
   systemStock: string;
+  mpesaCode: string;
 };
 
 export function parseDailySalesCSV(text: string): DailySalesRawRow[] {
@@ -55,6 +56,7 @@ export function parseDailySalesCSV(text: string): DailySalesRawRow[] {
     jobCardNo: (cells[15] ?? '').trim(),
     shelfCount: (cells[16] ?? '').trim(),
     systemStock: (cells[17] ?? '').trim(),
+    mpesaCode: (cells[18] ?? '').trim(),
   }));
 }
 
@@ -84,6 +86,24 @@ function parseMoney(raw: string): number | null {
   return Number.isFinite(n) ? displayToMinor(n) : null;
 }
 
+type StatedMethod = 'CASH' | 'MPESA' | 'BANK';
+
+/** Reads the CASH/MPESA/BANKED cell. The paper book sometimes writes an amount
+ * there instead of a method — a number says nothing about how it was paid, so
+ * it's treated the same as blank. */
+function parseStatedMethod(raw: string): StatedMethod | null | 'UNKNOWN' {
+  if (isEmptyCell(raw) || /^[\d,.\s]+$/.test(raw.trim())) return null;
+  const t = raw.toLowerCase().replace(/[\s._-]/g, '');
+  if (t.includes('mpesa')) return 'MPESA';
+  if (t.includes('bank')) return 'BANK';
+  if (t.includes('cash')) return 'CASH';
+  return 'UNKNOWN';
+}
+
+export function normaliseMpesaCode(raw: string): string {
+  return isEmptyCell(raw) ? '' : raw.replace(/\s+/g, '').toUpperCase();
+}
+
 export type ExistingPartForSale = {
   id: string; sku: string; name: string; category: string | null; selling_price_minor: number; quantity_on_hand: number; active: boolean;
 };
@@ -100,14 +120,21 @@ export type SalesPlannedRow = {
     p_payment_method: string; p_payment_status: string; p_sale_date: string;
     p_discount_minor: number; p_amount_paid_minor: number;
     p_items: { part_id: string; quantity: number; unit_price_minor: number; shelf_count: number | null }[];
+    p_payment_reference: string | null; p_payment_reference_at: string | null;
     p_vehicle_reg: string | null; p_vehicle_model: string | null;
     p_change_in_days: number; p_labour_minor: number; p_notes: string | null; p_job_card_id: string | null;
   };
   summary: string[];
 };
 
-export function planSalesRows(rows: DailySalesRawRow[], parts: ExistingPartForSale[], jobCardIdByNumber: Map<string, string> = new Map()): SalesPlannedRow[] {
+export function planSalesRows(
+  rows: DailySalesRawRow[],
+  parts: ExistingPartForSale[],
+  jobCardIdByNumber: Map<string, string> = new Map(),
+  existingMpesaCodes: Set<string> = new Set(),
+): SalesPlannedRow[] {
   const bySku = new Map(parts.map((p) => [p.sku.trim().toLowerCase(), p]));
+  const codeFirstSeen = new Map<string, { rowNumber: number; date: string }>();
   const stockBySku = new Map<string, number>();
   const planned: SalesPlannedRow[] = [];
 
@@ -191,6 +218,38 @@ export function planSalesRows(rows: DailySalesRawRow[], parts: ExistingPartForSa
     if (quantity !== null) dayAccumulated += grandTotal;
     dayHasItems = dayHasItems || quantity !== null;
 
+    // Payment method: an M-Pesa sale must carry its transaction code. A code on
+    // its own (method cell blank) is enough to mark the sale as M-Pesa.
+    const amountPaidMinor = Math.max(0, grandTotal - debtMinor);
+    const mpesaCode = normaliseMpesaCode(row.mpesaCode);
+    const stated = parseStatedMethod(row.cashMpesaBanked);
+    let paymentMethod: 'CASH' | 'MPESA' | 'BANK' | 'CREDIT';
+    if (amountPaidMinor <= 0) {
+      paymentMethod = 'CREDIT';
+      if (mpesaCode) warnings.push(`The whole amount is on debt, so M-Pesa code ${mpesaCode} was not recorded.`);
+    } else if (stated === 'MPESA' || (mpesaCode && (stated === null || stated === 'UNKNOWN'))) {
+      paymentMethod = 'MPESA';
+      if (!mpesaCode) errors.push('M-Pesa sale has no M-Pesa code — add it in the MPESA CODE column.');
+    } else if (stated === 'CASH' && mpesaCode) {
+      paymentMethod = 'MPESA';
+      warnings.push(`Marked as Cash but has M-Pesa code ${mpesaCode} — recorded as M-Pesa.`);
+    } else if (stated === 'BANK') {
+      paymentMethod = 'BANK';
+    } else if (stated === 'CASH') {
+      paymentMethod = 'CASH';
+    } else {
+      if (stated === 'UNKNOWN') warnings.push(`Unrecognised payment method "${row.cashMpesaBanked}" — recorded as ${debtMinor > 0 ? 'credit' : 'cash'}.`);
+      paymentMethod = debtMinor > 0 ? 'CREDIT' : 'CASH';
+    }
+    const recordedCode = paymentMethod === 'MPESA' || paymentMethod === 'BANK' ? mpesaCode || null : null;
+    if (paymentMethod === 'MPESA' && mpesaCode) {
+      if (!/^[A-Z0-9]{10}$/.test(mpesaCode)) warnings.push(`M-Pesa code "${mpesaCode}" isn't the usual 10 letters/digits — double-check it against the statement.`);
+      if (existingMpesaCodes.has(mpesaCode)) warnings.push(`M-Pesa code ${mpesaCode} is already on a sale in the system — this row may already have been imported.`);
+      const seen = codeFirstSeen.get(mpesaCode);
+      if (seen && seen.date !== dateStr) warnings.push(`M-Pesa code ${mpesaCode} is also used on row ${seen.rowNumber} (${seen.date}) — one payment rarely spans two days.`);
+      if (!seen) codeFirstSeen.set(mpesaCode, { rowNumber: row.rowNumber, date: dateStr });
+    }
+
     const currentStock = stockBySku.get(part.id) ?? part.quantity_on_hand;
     if (quantity !== null && quantity > currentStock) {
       errors.push(`Insufficient stock: only ${currentStock} of "${part.sku}" available at this point in the file (need ${quantity}).`);
@@ -210,11 +269,11 @@ export function planSalesRows(rows: DailySalesRawRow[], parts: ExistingPartForSa
       }
     }
 
-    const amountPaidMinor = Math.max(0, grandTotal - debtMinor);
     const paymentStatus = debtMinor <= 0 ? 'PAID' : amountPaidMinor <= 0 ? 'PENDING' : 'PARTIAL';
-    const paymentMethod = debtMinor > 0 ? 'CREDIT' : 'CASH';
 
     summary.push(`Sell ${quantity} × ${part.name} (${part.sku}) @ ${formatKes(priceMinor as number)}${labourMinor > 0 ? ` + ${formatKes(labourMinor)} labour` : ''} = ${formatKes(grandTotal)}`);
+    if (paymentMethod === 'MPESA') summary.push(`Paid by M-Pesa · ${mpesaCode}`);
+    else if (paymentMethod === 'BANK') summary.push(`Paid by bank${recordedCode ? ` · ${recordedCode}` : ''}`);
     if (debtMinor > 0) summary.push(`${formatKes(debtMinor)} left on credit`);
 
     const shelfCount = isEmptyCell(row.shelfCount) ? null : parseInt(row.shelfCount.replace(/[^0-9]/g, ''), 10) || null;
@@ -237,6 +296,9 @@ export function planSalesRows(rows: DailySalesRawRow[], parts: ExistingPartForSa
         p_discount_minor: 0,
         p_amount_paid_minor: amountPaidMinor,
         p_items: [{ part_id: part.id, quantity: quantity as number, unit_price_minor: priceMinor as number, shelf_count: shelfCount }],
+        // The day book records only the date, not the time of the payment.
+        p_payment_reference: recordedCode,
+        p_payment_reference_at: recordedCode ? localDayStart(parsedDate ?? new Date(dateStr)) : null,
         p_vehicle_reg: row.vehicle || null,
         p_vehicle_model: row.vehicleModel || null,
         p_change_in_days: isEmptyCell(row.changeInDays) ? 0 : parseInt(row.changeInDays, 10) || 0,

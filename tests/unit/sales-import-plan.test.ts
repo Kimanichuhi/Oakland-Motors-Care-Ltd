@@ -66,7 +66,7 @@ describe('planSalesRows against a real-world daily sales log', () => {
 
   it('flags a part sold that was never brought into the parts catalogue', () => {
     const [row] = planSalesRows(
-      [{ rowNumber: 3, date: '1 Aug 2026', changeInDays: '', customerName: '', vehicle: '', vehicleModel: '', sku: 'GHOST-SKU', description: '', quantity: '1', price: '100', sparesTotal: '100', labour: '', total: '100', dayTotal: '', cashMpesaBanked: '', debt: '', jobCardNo: '', shelfCount: '', systemStock: '' }],
+      [{ rowNumber: 3, date: '1 Aug 2026', changeInDays: '', customerName: '', vehicle: '', vehicleModel: '', sku: 'GHOST-SKU', description: '', quantity: '1', price: '100', sparesTotal: '100', labour: '', total: '100', dayTotal: '', cashMpesaBanked: '', debt: '', jobCardNo: '', shelfCount: '', systemStock: '', mpesaCode: '' }],
       [],
     );
     expect(row.action).toBe('ERROR');
@@ -76,8 +76,8 @@ describe('planSalesRows against a real-world daily sales log', () => {
   it('blocks a sale once a SKU\'s running stock in the file is exhausted', () => {
     const testParts: ExistingPartForSale[] = [{ id: 'p1', sku: 'X-1', name: 'Widget', category: null, selling_price_minor: 100, quantity_on_hand: 1, active: true }];
     const rows = [
-      { rowNumber: 3, date: '1 Aug 2026', changeInDays: '', customerName: '', vehicle: '', vehicleModel: '', sku: 'X-1', description: '', quantity: '1', price: '100', sparesTotal: '100', labour: '', total: '100', dayTotal: '', cashMpesaBanked: '', debt: '', jobCardNo: '', shelfCount: '', systemStock: '' },
-      { rowNumber: 4, date: '1 Aug 2026', changeInDays: '', customerName: '', vehicle: '', vehicleModel: '', sku: 'X-1', description: '', quantity: '1', price: '100', sparesTotal: '100', labour: '', total: '100', dayTotal: '', cashMpesaBanked: '', debt: '', jobCardNo: '', shelfCount: '', systemStock: '' },
+      { rowNumber: 3, date: '1 Aug 2026', changeInDays: '', customerName: '', vehicle: '', vehicleModel: '', sku: 'X-1', description: '', quantity: '1', price: '100', sparesTotal: '100', labour: '', total: '100', dayTotal: '', cashMpesaBanked: '', debt: '', jobCardNo: '', shelfCount: '', systemStock: '', mpesaCode: '' },
+      { rowNumber: 4, date: '1 Aug 2026', changeInDays: '', customerName: '', vehicle: '', vehicleModel: '', sku: 'X-1', description: '', quantity: '1', price: '100', sparesTotal: '100', labour: '', total: '100', dayTotal: '', cashMpesaBanked: '', debt: '', jobCardNo: '', shelfCount: '', systemStock: '', mpesaCode: '' },
     ];
     const [first, second] = planSalesRows(rows, testParts);
     expect(first.action).toBe('SALE');
@@ -88,7 +88,7 @@ describe('planSalesRows against a real-world daily sales log', () => {
   it('treats a DEBT balance as a credit sale, otherwise cash paid in full', () => {
     const testParts: ExistingPartForSale[] = [{ id: 'p1', sku: 'X-1', name: 'Widget', category: null, selling_price_minor: 100, quantity_on_hand: 10, active: true }];
     const rows = [
-      { rowNumber: 3, date: '1 Aug 2026', changeInDays: '', customerName: '', vehicle: '', vehicleModel: '', sku: 'X-1', description: '', quantity: '1', price: '100', sparesTotal: '100', labour: '', total: '100', dayTotal: '', cashMpesaBanked: '', debt: '40', jobCardNo: '', shelfCount: '', systemStock: '' },
+      { rowNumber: 3, date: '1 Aug 2026', changeInDays: '', customerName: '', vehicle: '', vehicleModel: '', sku: 'X-1', description: '', quantity: '1', price: '100', sparesTotal: '100', labour: '', total: '100', dayTotal: '', cashMpesaBanked: '', debt: '40', jobCardNo: '', shelfCount: '', systemStock: '', mpesaCode: '' },
     ];
     const [row] = planSalesRows(rows, testParts);
     expect(row.payload?.p_payment_method).toBe('CREDIT');
@@ -106,5 +106,67 @@ describe('planSalesRows against a real-world daily sales log', () => {
     // 2026-09-09: stated 1,150 vs summed 1,000 — the gap (150) is the 0.5-qty sandpaper row.
     expect(dayWarnings[1].warnings[0]).toContain('1,150');
     expect(dayWarnings[1].warnings[0]).toContain('1,000');
+  });
+});
+
+describe('planSalesRows M-Pesa handling', () => {
+  const testParts: ExistingPartForSale[] = [{ id: 'p1', sku: 'X-1', name: 'Widget', category: null, selling_price_minor: 100, quantity_on_hand: 10, active: true }];
+  const base = { rowNumber: 3, date: '1 Aug 2026', changeInDays: '', customerName: '', vehicle: '', vehicleModel: '', sku: 'X-1', description: '', quantity: '1', price: '100', sparesTotal: '100', labour: '', total: '100', dayTotal: '', cashMpesaBanked: '', debt: '', jobCardNo: '', shelfCount: '', systemStock: '', mpesaCode: '' };
+
+  it('reads the M-Pesa code from the last column of the day book', () => {
+    const csv = [
+      'Date,Change in days,Customer Name,Vehicle,Vehicle model,SPARES SALES,,,,,,,Day Total,CASH/MPESA/BANKED,DEBT,JOBCARD NO,REMAINING STOCK AT SHELVES,SYSTEM REMAINING STOCK,MPESA CODE',
+      ',,,,,Part/spare No,Description-& part make,Quantity sold,PRICE,Spares Total,Labour/ Service,TOTAL,,,,,,,',
+      '1 Aug 2026,,,,,X-1,Widget,1,100,100,,100,,MPESA,,,,,shk3xyz9ab',
+    ].join('\n');
+    const [row] = parseDailySalesCSV(csv);
+    expect(row.cashMpesaBanked).toBe('MPESA');
+    expect(row.mpesaCode).toBe('shk3xyz9ab');
+  });
+
+  it('records an M-Pesa sale with its code and the sale date as the payment time', () => {
+    const [row] = planSalesRows([{ ...base, cashMpesaBanked: 'M-Pesa', mpesaCode: 'shk3xyz9ab' }], testParts);
+    expect(row.action).toBe('SALE');
+    expect(row.payload?.p_payment_method).toBe('MPESA');
+    expect(row.payload?.p_payment_reference).toBe('SHK3XYZ9AB');
+    expect(row.payload?.p_payment_reference_at).toBe(row.payload?.p_sale_date);
+  });
+
+  it('rejects an M-Pesa sale with no code', () => {
+    const [row] = planSalesRows([{ ...base, cashMpesaBanked: 'MPESA' }], testParts);
+    expect(row.action).toBe('ERROR');
+    expect(row.errors[0]).toContain('no M-Pesa code');
+  });
+
+  it('treats a code with a blank method cell as M-Pesa', () => {
+    const [row] = planSalesRows([{ ...base, mpesaCode: 'SHK3XYZ9AB' }], testParts);
+    expect(row.payload?.p_payment_method).toBe('MPESA');
+  });
+
+  it('keeps plain cash and bank sales without a code', () => {
+    const [cash, bank] = planSalesRows([{ ...base, cashMpesaBanked: 'Cash' }, { ...base, rowNumber: 4, cashMpesaBanked: 'Banked' }], testParts);
+    expect(cash.payload?.p_payment_method).toBe('CASH');
+    expect(cash.payload?.p_payment_reference).toBeNull();
+    expect(bank.payload?.p_payment_method).toBe('BANK');
+  });
+
+  it('records the paid part of a part-debt sale as M-Pesa', () => {
+    const [row] = planSalesRows([{ ...base, debt: '40', mpesaCode: 'SHK3XYZ9AB' }], testParts);
+    expect(row.payload?.p_payment_method).toBe('MPESA');
+    expect(row.payload?.p_payment_status).toBe('PARTIAL');
+    expect(row.payload?.p_amount_paid_minor).toBe(6000);
+  });
+
+  it('ignores an amount written in the method column', () => {
+    const [row] = planSalesRows([{ ...base, cashMpesaBanked: '1,200' }], testParts);
+    expect(row.action).toBe('SALE');
+    expect(row.payload?.p_payment_method).toBe('CASH');
+    expect(row.warnings.some((w) => w.includes('payment method'))).toBe(false);
+  });
+
+  it('warns when a code is already on a sale in the system', () => {
+    const [row] = planSalesRows([{ ...base, mpesaCode: 'SHK3XYZ9AB' }], testParts, new Map(), new Set(['SHK3XYZ9AB']));
+    expect(row.action).toBe('SALE');
+    expect(row.warnings.some((w) => w.includes('already on a sale'))).toBe(true);
   });
 });
