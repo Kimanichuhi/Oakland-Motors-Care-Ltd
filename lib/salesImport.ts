@@ -73,6 +73,7 @@ export function parseDayBookDate(raw: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+
 function isEmptyCell(raw: string): boolean {
   const t = raw.trim();
   return t === '' || /^[-–—]+$/.test(t);
@@ -86,11 +87,21 @@ function parseMoney(raw: string): number | null {
   return Number.isFinite(n) ? displayToMinor(n) : null;
 }
 
+/** Stock and sale quantities are stored to 4 decimal places (numeric(12,4)),
+ * so plan with the same precision the database will actually hold. */
+export function roundQuantity(n: number): number {
+  return Math.round(n * 10000) / 10000;
+}
+
+export function formatQuantity(n: number): string {
+  return String(roundQuantity(n));
+}
+
 type StatedMethod = 'CASH' | 'MPESA' | 'BANK';
 
-/** Reads the CASH/MPESA/BANKED cell. The paper book sometimes writes an amount
- * there instead of a method — a number says nothing about how it was paid, so
- * it's treated the same as blank. */
+/** Reads the CASH/MPESA/BANKED cell. The day book usually writes the amount
+ * received there rather than the method — a number says nothing about how it
+ * was paid, so it's treated the same as blank. */
 function parseStatedMethod(raw: string): StatedMethod | null | 'UNKNOWN' {
   if (isEmptyCell(raw) || /^[\d,.\s]+$/.test(raw.trim())) return null;
   const t = raw.toLowerCase().replace(/[\s._-]/g, '');
@@ -104,9 +115,36 @@ export function normaliseMpesaCode(raw: string): string {
   return isEmptyCell(raw) ? '' : raw.replace(/\s+/g, '').toUpperCase();
 }
 
+/** One cell can hold several payment codes when a customer paid in more than
+ * one transaction ("UIAGA680B; UIAGA68W7L"). */
+export function splitPaymentCodes(raw: string): string[] {
+  if (isEmptyCell(raw)) return [];
+  return raw.split(/[;,/\s]+/).map(normaliseMpesaCode).filter(Boolean);
+}
+
+/** Bank transfer references (e.g. Equity's "FT26262VFPHS") start with FT;
+ * M-Pesa transaction codes are 10 letters/digits. */
+function isBankReference(code: string): boolean {
+  return /^FT[A-Z0-9]{8,}$/.test(code);
+}
+
+const WALK_IN_JOB_CARD_VALUES = new Set(['walkin', 'walkincustomer', 'none', 'na', 'n/a']);
+
+/** "JB-53", "jb053" and "JB-053" all mean the same work order. Returns null for
+ * blank cells and for "Walk in", which the day book writes for counter sales. */
+export function normaliseJobCardNumber(raw: string): string | null {
+  if (isEmptyCell(raw)) return null;
+  const t = raw.trim().toLowerCase();
+  if (WALK_IN_JOB_CARD_VALUES.has(t.replace(/[\s-]/g, ''))) return null;
+  const m = t.match(/^jb\s*-?\s*0*(\d+)$/);
+  return m ? `jb-${m[1].padStart(3, '0')}` : t;
+}
+
 export type ExistingPartForSale = {
   id: string; sku: string; name: string; category: string | null; selling_price_minor: number; quantity_on_hand: number; active: boolean;
 };
+
+export type JobCardRef = { id: string; customerName: string | null };
 
 export type SalesPlannedRow = {
   rowNumber: number;
@@ -127,31 +165,47 @@ export type SalesPlannedRow = {
   summary: string[];
 };
 
+/** Payments in the day book are recorded per day (or per M-Pesa transaction),
+ * not per part: CASH/MPESA/BANKED and DEBT hold the amounts received and owed,
+ * usually on the day's last row, and often include work-order labour. So every
+ * part row is recorded as paid — through the work order when it has a JB
+ * number, otherwise at the counter — and the day's money figures are reported
+ * as a day-level note instead of being pinned on whichever part shares the row. */
 export function planSalesRows(
   rows: DailySalesRawRow[],
   parts: ExistingPartForSale[],
-  jobCardIdByNumber: Map<string, string> = new Map(),
-  existingMpesaCodes: Set<string> = new Set(),
+  jobCardsByNumber: Map<string, JobCardRef> = new Map(),
+  existingPaymentCodes: Set<string> = new Set(),
 ): SalesPlannedRow[] {
   const bySku = new Map(parts.map((p) => [p.sku.trim().toLowerCase(), p]));
-  const codeFirstSeen = new Map<string, { rowNumber: number; date: string }>();
   const stockBySku = new Map<string, number>();
+  const codeFirstSeen = new Map<string, { rowNumber: number; date: string }>();
   const planned: SalesPlannedRow[] = [];
 
   let dayAccumulated = 0;
   let dayStatedTotal: number | null = null;
+  let dayReceived = 0;
+  let dayDebt = 0;
   let dayHasItems = false;
   let currentDate: string | null = null;
 
   function flushDay() {
-    if (currentDate === null || dayStatedTotal === null) return;
-    const tolerance = Math.max(100, Math.round(Math.abs(dayStatedTotal) * 0.01));
-    if (Math.abs(dayAccumulated - dayStatedTotal) > tolerance) {
+    if (currentDate === null) return;
+    if (dayStatedTotal !== null) {
+      const tolerance = Math.max(100, Math.round(Math.abs(dayStatedTotal) * 0.01));
+      if (Math.abs(dayAccumulated - dayStatedTotal) > tolerance) {
+        planned.push({
+          rowNumber: -1, date: currentDate, sku: '', action: 'SKIP', errors: [], summary: ['Day-total check'],
+          warnings: [dayHasItems
+            ? `${currentDate}: Day Total is ${formatKes(dayStatedTotal)} in the file, but the sales on that date sum to ${formatKes(dayAccumulated)} — check for a missing, errored, or mistyped row.`
+            : `${currentDate}: Day Total is ${formatKes(dayStatedTotal)} in the file, but no itemized sales are recorded for that date.`],
+        });
+      }
+    }
+    if (dayDebt > 0) {
       planned.push({
-        rowNumber: -1, date: currentDate, sku: '', action: 'SKIP', errors: [], summary: ['Day-total check'],
-        warnings: [dayHasItems
-          ? `${currentDate}: Day Total is ${formatKes(dayStatedTotal)} in the file, but the sales on that date sum to ${formatKes(dayAccumulated)} — check for a missing, errored, or mistyped row.`
-          : `${currentDate}: Day Total is ${formatKes(dayStatedTotal)} in the file, but no itemized sales are recorded for that date.`],
+        rowNumber: -1, date: currentDate, sku: '', action: 'SKIP', errors: [], summary: ['Day debt'],
+        warnings: [`${currentDate}: the book records ${formatKes(dayDebt)} owed${dayReceived > 0 ? ` (and ${formatKes(dayReceived)} received)` : ''} for this day. Debt isn't attached to individual part sales — record it against the work order or in the Debt Register.`],
       });
     }
   }
@@ -168,12 +222,16 @@ export function planSalesRows(
       currentDate = dateStr;
       dayAccumulated = 0;
       dayStatedTotal = null;
+      dayReceived = 0;
+      dayDebt = 0;
       dayHasItems = false;
     }
     if (!isEmptyCell(row.dayTotal)) {
       const v = parseMoney(row.dayTotal);
       if (v !== null) dayStatedTotal = v;
     }
+    if (parseStatedMethod(row.cashMpesaBanked) === null) dayReceived += parseMoney(row.cashMpesaBanked) ?? 0;
+    dayDebt += parseMoney(row.debt) ?? 0;
 
     if (isEmptyCell(row.sku)) {
       planned.push({ rowNumber: row.rowNumber, date: dateStr, sku: '', action: 'SKIP', errors, warnings, summary: ['No part on this row — ignored'] });
@@ -193,10 +251,12 @@ export function planSalesRows(
     if (isEmptyCell(row.quantity)) {
       errors.push('Missing Quantity sold.');
     } else {
-      const n = parseFloat(row.quantity);
+      const n = parseFloat(row.quantity.replace(/,/g, ''));
       if (!Number.isFinite(n) || n <= 0) errors.push(`Invalid Quantity sold "${row.quantity}".`);
-      else if (!Number.isInteger(n)) errors.push(`Quantity sold "${row.quantity}" is fractional — this system tracks whole units only. Round it in the source file (up, or split into a separate note) and re-import.`);
-      else quantity = n;
+      else {
+        quantity = roundQuantity(n);
+        if (quantity !== n) warnings.push(`Quantity sold ${row.quantity} is stored as ${formatQuantity(quantity)} (4 decimal places).`);
+      }
     }
 
     const priceMinor = parseMoney(row.price);
@@ -205,54 +265,46 @@ export function planSalesRows(
     if (priceMinor !== null && priceMinor !== part.selling_price_minor) warnings.push(`This part's current selling price is ${formatKes(part.selling_price_minor)}; importing at the historical price of ${formatKes(priceMinor)} requires price-override permission.`);
 
     const labourMinor = parseMoney(row.labour) ?? 0;
+    // Mirrors complete_sale, which rounds each line to whole cents.
+    const spareTotal = quantity !== null && priceMinor !== null ? Math.round(quantity * priceMinor) : 0;
+    const grandTotal = spareTotal + labourMinor;
     const totalMinor = parseMoney(row.total);
     if (quantity !== null && priceMinor !== null && totalMinor !== null) {
-      const expected = quantity * priceMinor + labourMinor;
       const tolerance = Math.max(100, Math.round(Math.abs(totalMinor) * 0.01));
-      if (Math.abs(expected - totalMinor) > tolerance) warnings.push(`TOTAL (${formatKes(totalMinor)}) doesn't match Quantity × PRICE + Labour (${formatKes(expected)}) — the computed value was used.`);
+      if (Math.abs(grandTotal - totalMinor) > tolerance) warnings.push(`TOTAL (${formatKes(totalMinor)}) doesn't match Quantity × PRICE + Labour (${formatKes(grandTotal)}) — the computed value was used.`);
     }
-
-    const debtMinor = parseMoney(row.debt) ?? 0;
-    const spareTotal = quantity !== null && priceMinor !== null ? quantity * priceMinor : 0;
-    const grandTotal = spareTotal + labourMinor;
     if (quantity !== null) dayAccumulated += grandTotal;
     dayHasItems = dayHasItems || quantity !== null;
 
-    // Payment method: an M-Pesa sale must carry its transaction code. A code on
-    // its own (method cell blank) is enough to mark the sale as M-Pesa.
-    const amountPaidMinor = Math.max(0, grandTotal - debtMinor);
-    const mpesaCode = normaliseMpesaCode(row.mpesaCode);
+    // Work order link. "Walk in" means a counter sale, not a missing work order.
+    const jobCardNumber = normaliseJobCardNumber(row.jobCardNo);
+    const jobCard = jobCardNumber ? jobCardsByNumber.get(jobCardNumber) ?? null : null;
+    if (jobCardNumber && !jobCard) warnings.push(`Work order "${row.jobCardNo}" was not found — this sale was imported without a work order link.`);
+
+    // Payment: a work-order part is paid through the work order; a counter sale
+    // is cash unless its row carries an M-Pesa code or bank reference.
+    const codes = splitPaymentCodes(row.mpesaCode);
     const stated = parseStatedMethod(row.cashMpesaBanked);
-    let paymentMethod: 'CASH' | 'MPESA' | 'BANK' | 'CREDIT';
-    if (amountPaidMinor <= 0) {
-      paymentMethod = 'CREDIT';
-      if (mpesaCode) warnings.push(`The whole amount is on debt, so M-Pesa code ${mpesaCode} was not recorded.`);
-    } else if (stated === 'MPESA' || (mpesaCode && (stated === null || stated === 'UNKNOWN'))) {
-      paymentMethod = 'MPESA';
-      if (!mpesaCode) errors.push('M-Pesa sale has no M-Pesa code — add it in the MPESA CODE column.');
-    } else if (stated === 'CASH' && mpesaCode) {
-      paymentMethod = 'MPESA';
-      warnings.push(`Marked as Cash but has M-Pesa code ${mpesaCode} — recorded as M-Pesa.`);
-    } else if (stated === 'BANK') {
-      paymentMethod = 'BANK';
-    } else if (stated === 'CASH') {
-      paymentMethod = 'CASH';
-    } else {
-      if (stated === 'UNKNOWN') warnings.push(`Unrecognised payment method "${row.cashMpesaBanked}" — recorded as ${debtMinor > 0 ? 'credit' : 'cash'}.`);
-      paymentMethod = debtMinor > 0 ? 'CREDIT' : 'CASH';
+    let paymentMethod: 'CASH' | 'MPESA' | 'BANK' | 'JOB_CARD';
+    if (jobCard) paymentMethod = 'JOB_CARD';
+    else if (stated === 'BANK' || (codes.length > 0 && codes.every(isBankReference))) paymentMethod = 'BANK';
+    else if (stated === 'MPESA' || codes.length > 0) paymentMethod = 'MPESA';
+    else paymentMethod = 'CASH';
+    if (stated === 'UNKNOWN') warnings.push(`Unrecognised payment method "${row.cashMpesaBanked}" — recorded as ${paymentMethod === 'JOB_CARD' ? 'paid through the work order' : paymentMethod.toLowerCase()}.`);
+    if (paymentMethod === 'MPESA' && codes.length === 0) errors.push('M-Pesa sale has no M-Pesa code — add it in the MPESA CODE column.');
+
+    for (const code of codes) {
+      if (!isBankReference(code) && !/^[A-Z0-9]{10}$/.test(code)) warnings.push(`M-Pesa code "${code}" isn't the usual 10 letters/digits — double-check it against the statement.`);
+      if (existingPaymentCodes.has(code)) warnings.push(`Payment code ${code} is already on a sale in the system — this row may already have been imported.`);
+      const seen = codeFirstSeen.get(code);
+      if (seen && seen.date !== dateStr) warnings.push(`Payment code ${code} is also used on row ${seen.rowNumber} (${seen.date}) — one payment rarely spans two days.`);
+      if (!seen) codeFirstSeen.set(code, { rowNumber: row.rowNumber, date: dateStr });
     }
-    const recordedCode = paymentMethod === 'MPESA' || paymentMethod === 'BANK' ? mpesaCode || null : null;
-    if (paymentMethod === 'MPESA' && mpesaCode) {
-      if (!/^[A-Z0-9]{10}$/.test(mpesaCode)) warnings.push(`M-Pesa code "${mpesaCode}" isn't the usual 10 letters/digits — double-check it against the statement.`);
-      if (existingMpesaCodes.has(mpesaCode)) warnings.push(`M-Pesa code ${mpesaCode} is already on a sale in the system — this row may already have been imported.`);
-      const seen = codeFirstSeen.get(mpesaCode);
-      if (seen && seen.date !== dateStr) warnings.push(`M-Pesa code ${mpesaCode} is also used on row ${seen.rowNumber} (${seen.date}) — one payment rarely spans two days.`);
-      if (!seen) codeFirstSeen.set(mpesaCode, { rowNumber: row.rowNumber, date: dateStr });
-    }
+    const paymentReference = codes.length > 0 ? codes.join(', ') : null;
 
     const currentStock = stockBySku.get(part.id) ?? part.quantity_on_hand;
     if (quantity !== null && quantity > currentStock) {
-      errors.push(`Insufficient stock: only ${currentStock} of "${part.sku}" available at this point in the file (need ${quantity}).`);
+      errors.push(`Insufficient stock: only ${formatQuantity(currentStock)} of "${part.sku}" available at this point in the file (need ${formatQuantity(quantity)}).`);
     }
 
     if (errors.length > 0) {
@@ -260,51 +312,45 @@ export function planSalesRows(
       return;
     }
 
-    const newStock = currentStock - (quantity as number);
+    const newStock = roundQuantity(currentStock - (quantity as number));
     stockBySku.set(part.id, newStock);
     if (!isEmptyCell(row.systemStock)) {
-      const stated = parseInt(row.systemStock.replace(/[^0-9-]/g, ''), 10);
-      if (Number.isFinite(stated) && stated !== newStock) {
-        warnings.push(`File says system stock should read ${stated} after this sale; based on the current database and this file's earlier rows it will actually be ${newStock}.`);
+      const stated = parseFloat(row.systemStock.replace(/[^0-9.-]/g, ''));
+      if (Number.isFinite(stated) && Math.abs(stated - newStock) > 0.01) {
+        warnings.push(`File says system stock should read ${row.systemStock.trim()} after this sale; based on the current database and this file's earlier rows it will actually be ${formatQuantity(newStock)}.`);
       }
     }
 
-    const paymentStatus = debtMinor <= 0 ? 'PAID' : amountPaidMinor <= 0 ? 'PENDING' : 'PARTIAL';
+    summary.push(`Sell ${formatQuantity(quantity as number)} × ${part.name} (${part.sku}) @ ${formatKes(priceMinor as number)}${labourMinor > 0 ? ` + ${formatKes(labourMinor)} labour` : ''} = ${formatKes(grandTotal)}`);
+    if (paymentMethod === 'JOB_CARD') summary.push(`Paid through work order ${row.jobCardNo.trim().toUpperCase()}${paymentReference ? ` · ${paymentReference}` : ''}`);
+    else if (paymentMethod === 'MPESA') summary.push(`Paid by M-Pesa · ${paymentReference}`);
+    else if (paymentMethod === 'BANK') summary.push(`Paid by bank${paymentReference ? ` · ${paymentReference}` : ''}`);
 
-    summary.push(`Sell ${quantity} × ${part.name} (${part.sku}) @ ${formatKes(priceMinor as number)}${labourMinor > 0 ? ` + ${formatKes(labourMinor)} labour` : ''} = ${formatKes(grandTotal)}`);
-    if (paymentMethod === 'MPESA') summary.push(`Paid by M-Pesa · ${mpesaCode}`);
-    else if (paymentMethod === 'BANK') summary.push(`Paid by bank${recordedCode ? ` · ${recordedCode}` : ''}`);
-    if (debtMinor > 0) summary.push(`${formatKes(debtMinor)} left on credit`);
-
-    const shelfCount = isEmptyCell(row.shelfCount) ? null : parseInt(row.shelfCount.replace(/[^0-9]/g, ''), 10) || null;
-
-    let jobCardId: string | null = null;
-    if (!isEmptyCell(row.jobCardNo)) {
-      jobCardId = jobCardIdByNumber.get(row.jobCardNo.trim().toLowerCase()) ?? null;
-      if (!jobCardId) warnings.push(`Work order "${row.jobCardNo}" was not found — this sale was imported without a work order link.`);
-    }
+    const shelfParsed = isEmptyCell(row.shelfCount) ? NaN : parseFloat(row.shelfCount.replace(/[^0-9.-]/g, ''));
+    const shelfCount = Number.isFinite(shelfParsed) ? roundQuantity(shelfParsed) : null;
+    const saleDate = localDayStart(parsedDate ?? new Date(dateStr));
 
     planned.push({
       rowNumber: row.rowNumber, date: dateStr, sku: row.sku, action: 'SALE', errors, warnings, summary,
       payload: {
-        p_customer_name: row.customerName || 'Walk-in customer',
+        p_customer_name: row.customerName || jobCard?.customerName || 'Walk-in customer',
         p_customer_phone: null,
-        p_customer_type: 'WALK_IN',
+        p_customer_type: jobCard ? 'VEHICLE_OWNER' : 'WALK_IN',
         p_payment_method: paymentMethod,
-        p_payment_status: paymentStatus,
-        p_sale_date: localDayStart(parsedDate ?? new Date(dateStr)),
+        p_payment_status: 'PAID',
+        p_sale_date: saleDate,
         p_discount_minor: 0,
-        p_amount_paid_minor: amountPaidMinor,
+        p_amount_paid_minor: grandTotal,
         p_items: [{ part_id: part.id, quantity: quantity as number, unit_price_minor: priceMinor as number, shelf_count: shelfCount }],
         // The day book records only the date, not the time of the payment.
-        p_payment_reference: recordedCode,
-        p_payment_reference_at: recordedCode ? localDayStart(parsedDate ?? new Date(dateStr)) : null,
+        p_payment_reference: paymentReference,
+        p_payment_reference_at: paymentReference ? saleDate : null,
         p_vehicle_reg: row.vehicle || null,
         p_vehicle_model: row.vehicleModel || null,
         p_change_in_days: isEmptyCell(row.changeInDays) ? 0 : parseInt(row.changeInDays, 10) || 0,
         p_labour_minor: labourMinor,
         p_notes: null,
-        p_job_card_id: jobCardId,
+        p_job_card_id: jobCard?.id ?? null,
       },
     });
   });

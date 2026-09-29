@@ -3,9 +3,10 @@ import { supabase } from '@/lib/supabase';
 import type { Part, Sale, Employee, Vehicle, JobCard } from '@/lib/types';
 import { formatKes, displayToMinor } from '@/lib/formatting';
 import { SALES_PAYMENT_METHODS, SALES_PAYMENT_STATUSES, CUSTOMER_SALE_TYPES } from '@/lib/constants';
+import { roundQuantity } from '@/lib/salesImport';
 import { Search, Plus, X, AlertTriangle, ShoppingCart } from 'lucide-react';
 
-type LineItem = { partId: string; sku: string; name: string; category: string | null; quantityOnHand: number; quantity: number; unitPriceMinor: number; shelfCount: string };
+type LineItem = { partId: string; sku: string; name: string; category: string | null; quantityOnHand: number; quantity: number; quantityText: string; unitPriceMinor: number; shelfCount: string };
 
 function nowForInput(): string {
   const d = new Date();
@@ -78,28 +79,40 @@ export default function SaleForm({ onClose, onSaved, can }: { onClose: () => voi
     return parts.filter((p) => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q)).slice(0, 8);
   }, [q, parts]);
 
-  const spareTotalMinor = items.reduce((sum, i) => sum + i.quantity * i.unitPriceMinor, 0);
+  // Rounded per line to whole cents, the same as complete_sale.
+  const spareTotalMinor = items.reduce((sum, i) => sum + Math.round(i.quantity * i.unitPriceMinor), 0);
   const labourMinor = Math.max(0, displayToMinor(parseFloat(labourDisplay) || 0));
   const totalMinor = spareTotalMinor + labourMinor;
   const isMpesa = paymentMethod === 'MPESA';
   const amountPaidMinor = paymentStatus === 'PAID' ? totalMinor : paymentStatus === 'PENDING' ? 0 : Math.min(totalMinor, Math.max(0, displayToMinor(parseFloat(partialPaidDisplay) || 0)));
   const hasZeroPricedItem = items.some((i) => i.unitPriceMinor === 0);
   const hasOverStockItem = items.some((i) => i.quantity > i.quantityOnHand);
+  const hasInvalidQuantity = items.some((i) => i.quantity <= 0);
 
   function addPart(part: Part) {
     if (part.quantity_on_hand <= 0) return;
     setItems((prev) => {
       const existing = prev.find((i) => i.partId === part.id);
       if (existing) {
-        return prev.map((i) => i.partId === part.id ? { ...i, quantity: Math.min(i.quantity + 1, part.quantity_on_hand) } : i);
+        return prev.map((i) => {
+          if (i.partId !== part.id) return i;
+          const quantity = roundQuantity(Math.min(i.quantity + 1, part.quantity_on_hand));
+          return { ...i, quantity, quantityText: String(quantity) };
+        });
       }
-      return [...prev, { partId: part.id, sku: part.sku, name: part.name, category: part.category, quantityOnHand: part.quantity_on_hand, quantity: 1, unitPriceMinor: part.selling_price_minor, shelfCount: '' }];
+      // Less than one unit can be left of a part sold by weight or fraction.
+      const quantity = Math.min(1, part.quantity_on_hand);
+      return [...prev, { partId: part.id, sku: part.sku, name: part.name, category: part.category, quantityOnHand: part.quantity_on_hand, quantity, quantityText: String(quantity), unitPriceMinor: part.selling_price_minor, shelfCount: '' }];
     });
     setQuery(''); setDropdownOpen(false);
   }
 
-  function updateQuantity(partId: string, quantity: number) {
-    setItems((prev) => prev.map((i) => i.partId === partId ? { ...i, quantity: Math.max(1, Math.min(quantity, i.quantityOnHand)) } : i));
+  // Decimals are allowed (0.5 kg, 1.5 sheets). The typed text is kept as-is so
+  // "0." can be typed on the way to "0.5"; an unusable value counts as 0 and blocks saving.
+  function updateQuantity(partId: string, text: string) {
+    const parsed = parseFloat(text);
+    const quantity = Number.isFinite(parsed) && parsed > 0 ? roundQuantity(parsed) : 0;
+    setItems((prev) => prev.map((i) => i.partId === partId ? { ...i, quantity, quantityText: text } : i));
   }
 
   function updateUnitPrice(partId: string, display: string) {
@@ -121,6 +134,7 @@ export default function SaleForm({ onClose, onSaved, can }: { onClose: () => voi
     if (!can('sales.create')) { setFormError('You are not authorized to create sales.'); return; }
     if (!customerName.trim()) { setFormError('Customer name is required.'); return; }
     if (items.length === 0) { setFormError('Add at least one item to the sale.'); return; }
+    if (hasInvalidQuantity) { setFormError('Enter a quantity greater than zero for every item.'); return; }
     if (hasOverStockItem) { setFormError('One or more items exceed available stock.'); return; }
     if (hasZeroPricedItem && !canOverridePrice) { setFormError('One or more items have no selling price set. Set a price on the part first, or ask for price-override access.'); return; }
     if (paymentStatus === 'PARTIAL' && amountPaidMinor <= 0) { setFormError('Enter an amount paid for a partial payment.'); return; }
@@ -139,7 +153,7 @@ export default function SaleForm({ onClose, onSaved, can }: { onClose: () => voi
         p_sale_date: new Date(saleDate).toISOString(),
         p_discount_minor: 0,
         p_amount_paid_minor: amountPaidMinor,
-        p_items: items.map((i) => ({ part_id: i.partId, quantity: i.quantity, unit_price_minor: i.unitPriceMinor, shelf_count: i.shelfCount.trim() === '' ? null : parseInt(i.shelfCount, 10) })),
+        p_items: items.map((i) => ({ part_id: i.partId, quantity: i.quantity, unit_price_minor: i.unitPriceMinor, shelf_count: i.shelfCount.trim() === '' ? null : parseFloat(i.shelfCount) })),
         p_payment_reference: isMpesa ? mpesaCode.trim() : null,
         p_payment_reference_at: isMpesa ? new Date(mpesaSentAt).toISOString() : null,
         p_technician_id: technicianId || null,
@@ -220,15 +234,15 @@ export default function SaleForm({ onClose, onSaved, can }: { onClose: () => voi
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div className="job-icon"><ShoppingCart size={16} /></div>
                   <div style={{ flex: 1, minWidth: 0 }}><strong>{i.name}</strong><span style={{ display: 'block', fontSize: 11, color: '#82909c' }}>{i.sku}{i.unitPriceMinor === 0 && <span style={{ color: '#a4493d' }}> · no price set</span>}</span></div>
-                  <input type="number" min={1} max={i.quantityOnHand} value={i.quantity} onChange={(e) => updateQuantity(i.partId, parseInt(e.target.value) || 1)} title="Quantity" style={{ width: 55, border: '1px solid #dfe5ea', borderRadius: 6, padding: '6px 8px', fontSize: 12 }} />
+                  <input type="number" min={0} step="any" max={i.quantityOnHand} value={i.quantityText} onChange={(e) => updateQuantity(i.partId, e.target.value)} title="Quantity" style={{ width: 55, border: '1px solid #dfe5ea', borderRadius: 6, padding: '6px 8px', fontSize: 12 }} />
                   {canOverridePrice ? (
                     <input type="number" min={0} step="0.01" value={(i.unitPriceMinor / 100).toString()} onChange={(e) => updateUnitPrice(i.partId, e.target.value)} title="Unit price" style={{ width: 85, border: '1px solid #dfe5ea', borderRadius: 6, padding: '6px 8px', fontSize: 12 }} />
                   ) : <span className="table-muted" style={{ flex: 'none', width: 85 }}>{formatKes(i.unitPriceMinor)}</span>}
-                  <span className="table-muted" style={{ width: 80, textAlign: 'right' }}>{formatKes(i.quantity * i.unitPriceMinor)}</span>
+                  <span className="table-muted" style={{ width: 80, textAlign: 'right' }}>{formatKes(Math.round(i.quantity * i.unitPriceMinor))}</span>
                   <button type="button" className="close-button" style={{ width: 28, height: 28, flexShrink: 0 }} onClick={() => removeItem(i.partId)}><X size={14} /></button>
                 </div>
                 <div style={{ marginLeft: 44, marginTop: 6 }}>
-                  <input type="number" min={0} value={i.shelfCount} onChange={(e) => updateShelfCount(i.partId, e.target.value)} placeholder="Remaining stock at shelves (optional)" style={{ width: 260, border: '1px solid #dfe5ea', borderRadius: 6, padding: '5px 8px', fontSize: 11 }} />
+                  <input type="number" min={0} step="any" value={i.shelfCount} onChange={(e) => updateShelfCount(i.partId, e.target.value)} placeholder="Remaining stock at shelves (optional)" style={{ width: 260, border: '1px solid #dfe5ea', borderRadius: 6, padding: '5px 8px', fontSize: 11 }} />
                 </div>
               </div>)}
             </div>

@@ -3832,16 +3832,16 @@ function StockAdjustForm({ onClose, onSaved, onGoToReceive, onGoToSales, onGoToW
     let quantity: number;
     if (meta.kind === 'count') {
       const onHand = selectedPart?.quantity_on_hand ?? 0;
-      const delta = parseInt(countedQty || '0') - onHand;
+      const delta = Math.round(((parseFloat(countedQty) || 0) - onHand) * 10000) / 10000;
       if (delta === 0) { onSaved('No difference between the counted and recorded quantity — nothing to adjust.'); return; }
       adjType = delta > 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
       quantity = Math.abs(delta);
     } else if (meta.kind === 'fixed') {
       adjType = meta.movementType;
-      quantity = parseInt(qty);
+      quantity = parseFloat(qty);
     } else {
       adjType = direction === 'IN' ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
-      quantity = parseInt(qty);
+      quantity = parseFloat(qty);
     }
     setBusy(true);
     const reasonText = detail.trim() ? `${reason} — ${detail.trim()}` : reason;
@@ -3857,8 +3857,8 @@ function StockAdjustForm({ onClose, onSaved, onGoToReceive, onGoToSales, onGoToW
     {meta.kind === 'fixed' && <p className="muted" style={{ margin: 0 }}>{meta.direction === 'IN' ? 'This adds units back into stock.' : 'This removes units from stock.'}</p>}
     {meta.kind === 'choice' && <label>Direction<select value={direction} onChange={(e) => setDirection(e.target.value as 'IN' | 'OUT')}><option value="IN">Add to stock</option><option value="OUT">Remove from stock</option></select></label>}
     {meta.kind === 'count'
-      ? <div className="form-row"><label>Recorded on hand<input value={selectedPart?.quantity_on_hand ?? 0} disabled /></label><label>Counted quantity<input type="number" value={countedQty} onChange={(e) => setCountedQty(e.target.value)} required min="0" /></label></div>
-      : meta.kind !== 'redirect' && <label>Quantity<input type="number" value={qty} onChange={(e) => setQty(e.target.value)} required min="1" /></label>}
+      ? <div className="form-row"><label>Recorded on hand<input value={selectedPart?.quantity_on_hand ?? 0} disabled /></label><label>Counted quantity<input type="number" value={countedQty} onChange={(e) => setCountedQty(e.target.value)} required min="0" step="any" /></label></div>
+      : meta.kind !== 'redirect' && <label>Quantity<input type="number" value={qty} onChange={(e) => setQty(e.target.value)} required min="0.0001" step="any" /></label>}
     {meta.kind !== 'redirect' && <label>Additional detail <span className="optional">Optional</span><input value={detail} onChange={(e) => setDetail(e.target.value)} placeholder="e.g. supplier credit note number" /></label>}
     <button className="button primary wide" disabled={busy || !partId || meta.kind === 'redirect'}>{busy ? 'Adjusting...' : 'Adjust stock'} <ArrowUpRight size={16} /></button>
   </form></Modal>;

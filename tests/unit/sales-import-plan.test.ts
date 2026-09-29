@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { parseCSVRows } from '@/lib/csv';
 import { planRows } from '@/lib/partsImport';
-import { parseDailySalesCSV, parseDayBookDate, planSalesRows, type ExistingPartForSale } from '@/lib/salesImport';
+import { parseDailySalesCSV, parseDayBookDate, planSalesRows, normaliseJobCardNumber, type ExistingPartForSale, type JobCardRef } from '@/lib/salesImport';
 
 /** Builds the parts catalogue exactly as it would exist in the database after
  * running the parts bulk-upload plan for PARTS_ready_to_import.csv, including
@@ -58,10 +58,11 @@ describe('planSalesRows against a real-world daily sales log', () => {
     expect(skipped.length).toBeGreaterThan(0);
   });
 
-  it('rejects fractional quantities rather than silently rounding them', () => {
-    const errors = planned.filter((p) => p.action === 'ERROR');
-    expect(errors.length).toBe(5);
-    for (const e of errors) expect(e.errors[0]).toContain('fractional');
+  it('imports fractional quantities as decimals instead of rejecting them', () => {
+    expect(planned.filter((p) => p.action === 'ERROR')).toHaveLength(0);
+    const fractional = planned.filter((p) => p.action === 'SALE' && !Number.isInteger(p.payload!.p_items[0].quantity));
+    expect(fractional.length).toBe(5);
+    expect(fractional.some((p) => p.payload!.p_items[0].quantity === 0.5)).toBe(true);
   });
 
   it('flags a part sold that was never brought into the parts catalogue', () => {
@@ -85,27 +86,22 @@ describe('planSalesRows against a real-world daily sales log', () => {
     expect(second.errors[0]).toContain('Insufficient stock');
   });
 
-  it('treats a DEBT balance as a credit sale, otherwise cash paid in full', () => {
+  it("keeps the day's DEBT off the part sale and flags it for the day instead", () => {
     const testParts: ExistingPartForSale[] = [{ id: 'p1', sku: 'X-1', name: 'Widget', category: null, selling_price_minor: 100, quantity_on_hand: 10, active: true }];
     const rows = [
       { rowNumber: 3, date: '1 Aug 2026', changeInDays: '', customerName: '', vehicle: '', vehicleModel: '', sku: 'X-1', description: '', quantity: '1', price: '100', sparesTotal: '100', labour: '', total: '100', dayTotal: '', cashMpesaBanked: '', debt: '40', jobCardNo: '', shelfCount: '', systemStock: '', mpesaCode: '' },
     ];
-    const [row] = planSalesRows(rows, testParts);
-    expect(row.payload?.p_payment_method).toBe('CREDIT');
-    expect(row.payload?.p_payment_status).toBe('PARTIAL');
-    expect(row.payload?.p_amount_paid_minor).toBe(6000); // 100 - 40 = 60.00
+    const [row, dayNote] = planSalesRows(rows, testParts);
+    expect(row.payload?.p_payment_method).toBe('CASH');
+    expect(row.payload?.p_payment_status).toBe('PAID');
+    expect(row.payload?.p_amount_paid_minor).toBe(10000);
+    expect(dayNote.rowNumber).toBe(-1);
+    expect(dayNote.warnings[0]).toMatch(/Ksh\s40 owed/);
   });
 
-  it("the two remaining day-total gaps are fully explained by that day's fractional-quantity errors, not a separate data problem", () => {
-    const dayWarnings = planned.filter((p) => p.rowNumber === -1 && p.date !== '2026-08-01');
-    expect(dayWarnings.length).toBe(2);
-    // 2026-09-07: stated 3,555 vs summed 3,180 — the gap (375) equals the two 0.5-qty
-    // sandpaper rows (150 + 150) plus the 0.5-qty newspaper row (75) that error out that day.
-    expect(dayWarnings[0].warnings[0]).toContain('3,555');
-    expect(dayWarnings[0].warnings[0]).toContain('3,180');
-    // 2026-09-09: stated 1,150 vs summed 1,000 — the gap (150) is the 0.5-qty sandpaper row.
-    expect(dayWarnings[1].warnings[0]).toContain('1,150');
-    expect(dayWarnings[1].warnings[0]).toContain('1,000');
+  it('day totals match once fractional rows are imported (the old 7 and 9 Sep gaps were exactly those rows)', () => {
+    const dayTotalGaps = planned.filter((p) => p.rowNumber === -1 && p.summary[0] === 'Day-total check' && p.date !== '2026-08-01');
+    expect(dayTotalGaps).toHaveLength(0);
   });
 });
 
@@ -150,11 +146,24 @@ describe('planSalesRows M-Pesa handling', () => {
     expect(bank.payload?.p_payment_method).toBe('BANK');
   });
 
-  it('records the paid part of a part-debt sale as M-Pesa', () => {
-    const [row] = planSalesRows([{ ...base, debt: '40', mpesaCode: 'SHK3XYZ9AB' }], testParts);
-    expect(row.payload?.p_payment_method).toBe('MPESA');
-    expect(row.payload?.p_payment_status).toBe('PARTIAL');
-    expect(row.payload?.p_amount_paid_minor).toBe(6000);
+  it('records a work-order row as paid through the work order, keeping its codes', () => {
+    const jobs = new Map<string, JobCardRef>([['jb-066', { id: 'job-66', customerName: 'Jane Owner' }]]);
+    const [row] = planSalesRows([{ ...base, jobCardNo: 'JB-066', mpesaCode: 'SHK3XYZ9AB' }], testParts, jobs);
+    expect(row.payload?.p_payment_method).toBe('JOB_CARD');
+    expect(row.payload?.p_payment_status).toBe('PAID');
+    expect(row.payload?.p_job_card_id).toBe('job-66');
+    expect(row.payload?.p_customer_name).toBe('Jane Owner');
+    expect(row.payload?.p_payment_reference).toBe('SHK3XYZ9AB');
+  });
+
+  it('splits several codes in one cell and treats FT references as bank transfers', () => {
+    const [mpesa, bank] = planSalesRows([
+      { ...base, mpesaCode: 'SHK3XYZ9AB; SHK3XYZ9AC' },
+      { ...base, rowNumber: 4, mpesaCode: 'FT262612ZG03; FT26262VFPHS' },
+    ], testParts);
+    expect(mpesa.payload?.p_payment_method).toBe('MPESA');
+    expect(mpesa.payload?.p_payment_reference).toBe('SHK3XYZ9AB, SHK3XYZ9AC');
+    expect(bank.payload?.p_payment_method).toBe('BANK');
   });
 
   it('ignores an amount written in the method column', () => {
@@ -168,5 +177,61 @@ describe('planSalesRows M-Pesa handling', () => {
     const [row] = planSalesRows([{ ...base, mpesaCode: 'SHK3XYZ9AB' }], testParts, new Map(), new Set(['SHK3XYZ9AB']));
     expect(row.action).toBe('SALE');
     expect(row.warnings.some((w) => w.includes('already on a sale'))).toBe(true);
+  });
+});
+
+describe('normaliseJobCardNumber', () => {
+  it('matches the day book\'s spellings of a work order number', () => {
+    expect(normaliseJobCardNumber('JB-53')).toBe('jb-053');
+    expect(normaliseJobCardNumber('jb053')).toBe('jb-053');
+    expect(normaliseJobCardNumber('JB-100')).toBe('jb-100');
+  });
+
+  it('treats "Walk in" and blanks as no work order', () => {
+    expect(normaliseJobCardNumber('Walk in')).toBeNull();
+    expect(normaliseJobCardNumber('walk-in')).toBeNull();
+    expect(normaliseJobCardNumber('')).toBeNull();
+  });
+});
+
+describe('planSalesRows against the September day book (daily sales_10.csv)', () => {
+  const raw = parseDailySalesCSV(readFileSync(join(__dirname, 'fixtures/daily sales_10.csv'), 'utf8'));
+  // Stock as the book implies it just before each part's first sale in the file.
+  const opening = new Map<string, number>();
+  for (const r of raw) {
+    const key = r.sku.trim().toLowerCase();
+    if (key && !opening.has(key)) opening.set(key, parseFloat(r.systemStock) + parseFloat(r.quantity));
+  }
+  const parts: ExistingPartForSale[] = Array.from(opening.entries()).map(([sku, qty]) => ({ id: sku, sku, name: sku, category: null, selling_price_minor: 0, quantity_on_hand: qty, active: true }));
+  const jobs = new Map<string, JobCardRef>();
+  for (const r of raw) {
+    const key = normaliseJobCardNumber(r.jobCardNo);
+    if (key) jobs.set(key, { id: key, customerName: null });
+  }
+  const planned = planSalesRows(raw, parts, jobs);
+  const sales = planned.filter((p) => p.action === 'SALE');
+
+  it('plans every part row except the one the book itself shows going below zero', () => {
+    expect(sales).toHaveLength(73);
+    const errors = planned.filter((p) => p.action === 'ERROR');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].sku).toContain('K16TR-11'); // book: system stock -4 after this sale
+    expect(errors[0].errors[0]).toContain('Insufficient stock');
+  });
+
+  it('matches every Day Total and flags only the three days with debt', () => {
+    const notes = planned.filter((p) => p.rowNumber === -1);
+    expect(notes.every((n) => n.summary[0] === 'Day debt')).toBe(true);
+    expect(notes.map((n) => n.date)).toEqual(['2026-09-16', '2026-09-25', '2026-09-26']);
+  });
+
+  it('stores a sixth of a sheet to 4 decimal places, a cent off the book at most', () => {
+    const sixth = sales.find((p) => p.payload!.p_items[0].quantity === 0.1667)!;
+    expect(sixth).toBeTruthy();
+    expect(Math.round(0.1667 * sixth.payload!.p_items[0].unit_price_minor)).toBe(5001); // book: 50.00
+  });
+
+  it('never warns about "Walk in" as a missing work order', () => {
+    expect(planned.some((p) => p.warnings.some((w) => w.includes('"Walk in"')))).toBe(false);
   });
 });

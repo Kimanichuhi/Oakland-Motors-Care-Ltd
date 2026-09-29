@@ -1,14 +1,14 @@
 import React, { useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatKes, formatDate } from '@/lib/formatting';
-import { parseDailySalesCSV, planSalesRows, normaliseMpesaCode, type ExistingPartForSale, type SalesPlannedRow } from '@/lib/salesImport';
+import { parseDailySalesCSV, planSalesRows, splitPaymentCodes, normaliseJobCardNumber, type ExistingPartForSale, type JobCardRef, type SalesPlannedRow } from '@/lib/salesImport';
 import { Upload, Download, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 function downloadSalesTemplate() {
   const header1 = 'Date,Change in days,Customer Name,Vehicle,Vehicle model,SPARES SALES,,,,,,,Day Total,CASH/MPESA/BANKED,DEBT,JOBCARD NO,REMAINING STOCK AT SHELVES,SYSTEM REMAINING STOCK,MPESA CODE';
   const header2 = ',,,,,Part/spare No,Description-& part make,Quantity sold,PRICE,Spares Total,Labour/ Service,TOTAL,,,,,,,';
-  const example = '1 Aug 2026,,,,,BP-001,Brake pads,1,850,850,,850,,MPESA,,,,,SHK3XYZ9AB';
-  const cashExample = '1 Aug 2026,,,,,OF-002,Oil filter,1,600,600,,600,,CASH,,,,,';
+  const example = '1 Aug 2026,1,,KCS 551X,Honda fit,BP-001,Brake pads,1,850,850,,850,,,,JB-066,4,3,';
+  const cashExample = '1 Aug 2026,,,,,NP-001,News paper 1kg,0.5,150,75,,75,925,925,,Walk in,20,19.5,SHK3XYZ9AB';
   const csv = [header1, header2, example, cashExample].join('\r\n');
   const BOM = String.fromCharCode(0xfeff);
   const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
@@ -36,15 +36,18 @@ export default function BulkSalesUploadDialog({ onClose, onSaved, canOverridePri
 
       const [{ data: partRows }, { data: jobCardRows }, { data: saleCodeRows }] = await Promise.all([
         supabase.from('parts').select('id,sku,name,category,selling_price_minor,quantity_on_hand,active'),
-        supabase.from('job_cards').select('id,job_number').is('deleted_at', null),
-        supabase.from('sales').select('payment_reference').eq('payment_method', 'MPESA').not('payment_reference', 'is', null),
+        supabase.from('job_cards').select('id,job_number,customers(full_name)').is('deleted_at', null),
+        supabase.from('sales').select('payment_reference').neq('status', 'VOIDED').not('payment_reference', 'is', null),
       ]);
       const parts = (partRows ?? []) as ExistingPartForSale[];
-      const jobCardIdByNumber = new Map((((jobCardRows ?? [])) as { id: string; job_number: string }[]).map((j) => [j.job_number.trim().toLowerCase(), j.id]));
+      const jobCardsByNumber = new Map<string, JobCardRef>();
+      for (const j of (jobCardRows ?? []) as unknown as { id: string; job_number: string; customers: { full_name: string } | null }[]) {
+        const key = normaliseJobCardNumber(j.job_number);
+        if (key) jobCardsByNumber.set(key, { id: j.id, customerName: j.customers?.full_name ?? null });
+      }
+      const existingPaymentCodes = new Set(((saleCodeRows ?? []) as { payment_reference: string }[]).flatMap((s) => splitPaymentCodes(s.payment_reference)));
 
-      const existingMpesaCodes = new Set(((saleCodeRows ?? []) as { payment_reference: string }[]).map((s) => normaliseMpesaCode(s.payment_reference)));
-
-      setPlanned(planSalesRows(rawRows, parts, jobCardIdByNumber, existingMpesaCodes));
+      setPlanned(planSalesRows(rawRows, parts, jobCardsByNumber, existingPaymentCodes));
     } catch (err) {
       setParseError(err instanceof Error ? err.message : 'Unable to read this file.');
     } finally { setParsing(false); }
@@ -55,7 +58,7 @@ export default function BulkSalesUploadDialog({ onClose, onSaved, canOverridePri
       if (!prev) return prev;
       const row = prev[index];
       if (row.action !== 'SALE' || !row.payload) return prev;
-      const parsed = value.trim() === '' ? null : parseInt(value, 10);
+      const parsed = value.trim() === '' ? null : parseFloat(value);
       const shelfCount = parsed !== null && Number.isFinite(parsed) ? parsed : null;
       const next = [...prev];
       next[index] = { ...row, payload: { ...row.payload, p_items: [{ ...row.payload.p_items[0], shelf_count: shelfCount }] } };
@@ -96,7 +99,7 @@ export default function BulkSalesUploadDialog({ onClose, onSaved, canOverridePri
 
         {!planned && !parsing && (
           <div className="modal-form">
-            <p className="muted" style={{ margin: 0 }}>Upload the daily sales day book (one row per part sold). Each row checks the part exists and has enough stock, then records a sale and deducts stock automatically — the same way completing a sale in the app does. Rows with no part on them (day totals, blank spacer rows) are skipped; rows for a part not yet in the Parts module are flagged as errors, not guessed at. Shelf count comes from the file but can be corrected in the preview below; system remaining stock is always computed automatically from actual stock, never editable. Every M-Pesa sale must have its transaction code in the MPESA CODE column (the last column) — M-Pesa rows without one are flagged as errors.</p>
+            <p className="muted" style={{ margin: 0 }}>Upload the daily sales day book (one row per part sold). Each row checks the part exists and has enough stock, then records a sale and deducts stock automatically — the same way completing a sale in the app does. Rows with no part on them (day totals, blank spacer rows) are skipped; rows for a part not yet in the Parts module are flagged as errors, not guessed at. Shelf count comes from the file but can be corrected in the preview below; system remaining stock is always computed automatically from actual stock, never editable. Quantities can be decimals (0.5 kg, 1.5 sheets). Rows with a work order number (JB-…) are recorded as paid through that work order; &quot;Walk in&quot; rows are counter sales, recorded as Cash, or as M-Pesa when the row has a code in the MPESA CODE column (several codes can share one cell). The day&apos;s CASH/MPESA/BANKED and DEBT amounts are checked per day, not assigned to a single part — any debt is flagged so you can record it on the work order or in the Debt Register.</p>
             {!canOverridePrice && <p className="form-error" style={{ margin: 0 }}><AlertTriangle size={14} /> You don&apos;t have price-override access. Historical sales almost always sell at a different price than the part&apos;s current selling price, which requires it — ask an admin to run this upload, or grant you that permission first.</p>}
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" className="button secondary wide" onClick={downloadSalesTemplate}><Download size={16} /> Download template</button>
@@ -126,7 +129,7 @@ export default function BulkSalesUploadDialog({ onClose, onSaved, canOverridePri
                   <td><span className={`status ${r.action === 'SALE' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>{r.action}</span></td>
                   <td>
                     {r.action === 'SALE' && <input
-                      type="number" min={0}
+                      type="number" min={0} step="any"
                       value={r.payload?.p_items[0]?.shelf_count ?? ''}
                       onChange={(e) => updateShelfCount(i, e.target.value)}
                       onClick={(e) => e.stopPropagation()}
