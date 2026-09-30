@@ -37,3 +37,6 @@ next-env.d.ts
 
 # Office lock files
 ~$*
+
+# Business data exports (customer names, phones, M-Pesa codes) - keep off the public repo
+/*.csv
