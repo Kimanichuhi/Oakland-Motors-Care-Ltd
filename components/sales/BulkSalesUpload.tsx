@@ -2,7 +2,8 @@ import React, { useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatKes, formatDate } from '@/lib/formatting';
 import { parseDailySalesCSV, planSalesRows, splitPaymentCodes, normaliseJobCardNumber, type ExistingPartForSale, type JobCardRef, type SalesPlannedRow } from '@/lib/salesImport';
-import { Upload, Download, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { errorMessage, printUploadErrorReport, type UploadErrorReportRow } from '@/lib/uploadErrorReport';
+import { Upload, Download, X, AlertTriangle, CheckCircle2, Printer } from 'lucide-react';
 
 function downloadSalesTemplate() {
   const header1 = 'Date,Change in days,Customer Name,Vehicle,Vehicle model,SPARES SALES,,,,,,,Day Total,CASH/MPESA/BANKED,DEBT,JOBCARD NO,REMAINING STOCK AT SHELVES,SYSTEM REMAINING STOCK,MPESA CODE';
@@ -26,9 +27,10 @@ export default function BulkSalesUploadDialog({ onClose, onSaved, canOverridePri
   const [progress, setProgress] = useState(0);
   const [parseError, setParseError] = useState('');
   const [done, setDone] = useState<{ created: number; failed: number } | null>(null);
+  const [failedRows, setFailedRows] = useState<{ row: SalesPlannedRow; message: string }[]>([]);
 
   async function handleFile(file: File) {
-    setParseError(''); setPlanned(null); setDone(null); setFileName(file.name); setParsing(true);
+    setParseError(''); setPlanned(null); setDone(null); setFailedRows([]); setFileName(file.name); setParsing(true);
     try {
       const text = await file.text();
       const rawRows = parseDailySalesCSV(text);
@@ -71,23 +73,36 @@ export default function BulkSalesUploadDialog({ onClose, onSaved, canOverridePri
   const dayWarningRows = (planned ?? []).filter((r) => r.rowNumber === -1);
   const priceOverrideNeeded = actionable.some((r) => r.warnings.some((w) => w.includes('price-override')));
 
+  function printErrors() {
+    const rows: UploadErrorReportRow[] = [
+      ...errorRows.map((r) => ({ rowNumber: r.rowNumber, date: r.date, reference: r.sku, stage: 'CHECK' as const, errors: r.errors, warnings: r.warnings })),
+      ...failedRows.map((f) => ({ rowNumber: f.row.rowNumber, date: f.row.date, reference: f.row.sku, stage: 'SAVE' as const, errors: [f.message] })),
+      ...dayWarningRows.map((r) => ({ rowNumber: null, date: r.date, reference: 'Whole day', stage: 'NOTE' as const, errors: [], warnings: r.warnings })),
+    ];
+    printUploadErrorReport({ title: 'Sales', fileName, rows, referenceLabel: 'Part / SKU' });
+  }
+  const hasReport = errorRows.length > 0 || dayWarningRows.length > 0 || failedRows.length > 0;
+
   async function apply() {
     if (!planned) return;
     setApplying(true); setProgress(0);
     let created = 0, failed = 0;
+    const failures: { row: SalesPlannedRow; message: string }[] = [];
 
     for (const row of actionable) {
       try {
         const { error } = await supabase.rpc('complete_sale', row.payload as unknown as Record<string, unknown>);
         if (error) throw error;
         created++;
-      } catch {
+      } catch (err) {
         failed++;
+        failures.push({ row, message: errorMessage(err) });
       }
       setProgress((p) => p + 1);
     }
 
     setApplying(false);
+    setFailedRows(failures);
     setDone({ created, failed });
     if (failed === 0) onSaved(`Bulk sales upload applied: ${created} sale${created === 1 ? '' : 's'} recorded.`);
   }
@@ -117,7 +132,8 @@ export default function BulkSalesUploadDialog({ onClose, onSaved, canOverridePri
             <div className="action-buttons" style={{ marginBottom: 4 }}>
               <span className="status bg-emerald-50 text-emerald-700">{actionable.length} sale{actionable.length === 1 ? '' : 's'} to record</span>
               {errorRows.length > 0 && <span className="status bg-red-50 text-red-700">{errorRows.length} errors</span>}
-              {dayWarningRows.length > 0 && <span className="status bg-amber-50 text-amber-700">{dayWarningRows.length} day-total check{dayWarningRows.length === 1 ? '' : 's'} flagged</span>}
+              {dayWarningRows.length > 0 && <span className="status bg-amber-50 text-amber-700">{dayWarningRows.length} day note{dayWarningRows.length === 1 ? '' : 's'} to check</span>}
+              {hasReport && <button type="button" className="button secondary small" style={{ marginLeft: 'auto' }} onClick={printErrors}><Printer size={14} /> Print error report</button>}
             </div>
             {priceOverrideNeeded && !canOverridePrice && <div className="form-error"><AlertTriangle size={14} /> Some rows sell below/above the part&apos;s current price and will fail without price-override access.</div>}
             {dayWarningRows.map((r, i) => <div key={i} className="form-error" style={{ fontSize: 12 }}><AlertTriangle size={12} style={{ verticalAlign: -1 }} /> {r.warnings.join(' ')}</div>)}
@@ -160,9 +176,17 @@ export default function BulkSalesUploadDialog({ onClose, onSaved, canOverridePri
             <div className="empty" style={{ padding: '18px 12px' }}>
               {done.failed === 0 ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
               <strong>{done.failed === 0 ? 'Upload applied' : 'Upload finished with some failures'}</strong>
-              <span>{done.created} sale{done.created === 1 ? '' : 's'} recorded{done.failed > 0 ? ` · ${done.failed} failed` : ''}</span>
+              <span>{done.created} sale{done.created === 1 ? '' : 's'} recorded{done.failed > 0 ? ` · ${done.failed} failed` : ''}{errorRows.length > 0 ? ` · ${errorRows.length} not imported (errors)` : ''}</span>
             </div>
-            <button type="button" className="button primary wide" onClick={onClose}>Close</button>
+            {failedRows.length > 0 && <div className="report-table-wrap" style={{ maxHeight: 220, overflowY: 'auto' }}>
+              <table className="report-table"><thead><tr><th>Row</th><th>SKU</th><th>Reason</th></tr></thead><tbody>
+                {failedRows.map((f) => <tr key={f.row.rowNumber}><td>{f.row.rowNumber}</td><td>{f.row.sku}</td><td style={{ fontSize: 11, color: '#a4493d' }}>{f.message}</td></tr>)}
+              </tbody></table>
+            </div>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              {hasReport && <button type="button" className="button secondary" onClick={printErrors}><Printer size={16} /> Print error report</button>}
+              <button type="button" className="button primary wide" onClick={onClose}>Close</button>
+            </div>
           </div>
         )}
       </div>

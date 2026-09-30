@@ -3,7 +3,8 @@ import { supabase } from '@/lib/supabase';
 import { formatDate } from '@/lib/formatting';
 import { parseScrapBulkCSV, planScrapRows, type ScrapPlannedRow, type ScrapPlannedOp } from '@/lib/scrapImport';
 import type { ScrapItem } from '@/lib/types';
-import { Upload, Download, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { errorMessage, printUploadErrorReport, type UploadErrorReportRow } from '@/lib/uploadErrorReport';
+import { Upload, Download, X, AlertTriangle, CheckCircle2, Printer } from 'lucide-react';
 
 function downloadScrapTemplate() {
   const header = 'Date,Change in Days,Entry Type,Scrap Type,KG,Expense Category,Amount (KES),Notes';
@@ -22,22 +23,6 @@ function downloadScrapTemplate() {
 
 const ACTION_ORDER: Record<ScrapPlannedOp['kind'], number> = { CASH: 0, PURCHASE: 1, EXPENSE: 2 };
 
-// err instanceof Error misses real, informative failures that aren't Error
-// instances — a Supabase PostgrestError still has a usable .message even if
-// something upstream re-wraps it, and an aborted/timed-out fetch throws a
-// DOMException, which has .name/.message but does NOT extend Error.
-function errorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message || err.name;
-  if (typeof err === 'object' && err !== null) {
-    const obj = err as Record<string, unknown>;
-    if (typeof obj.message === 'string' && obj.message) {
-      const name = typeof obj.name === 'string' && obj.name !== 'Error' ? `${obj.name}: ` : '';
-      return `${name}${obj.message}`;
-    }
-  }
-  if (typeof err === 'string' && err) return err;
-  return 'Unable to save this entry (no error detail was returned).';
-}
 
 type FailedRow = { row: ScrapPlannedRow; message: string };
 
@@ -85,6 +70,15 @@ export default function BulkScrapUploadDialog({ onClose, onSaved, can }: { onClo
 
   const actionable = (planned ?? []).filter((r) => r.op);
   const errorRows = (planned ?? []).filter((r) => r.action === 'ERROR');
+
+  function printErrors() {
+    const rows: UploadErrorReportRow[] = [
+      ...errorRows.map((r) => ({ rowNumber: r.rowNumber, date: r.date, stage: 'CHECK' as const, errors: r.errors, warnings: r.warnings })),
+      ...(failedRows ?? []).map((f) => ({ rowNumber: f.row.rowNumber, date: f.row.date, reference: f.row.op?.kind ?? '', stage: 'SAVE' as const, errors: [f.message.replace('INSUFFICIENT_CASH: ', '')] })),
+    ];
+    printUploadErrorReport({ title: 'Scrap daily records', fileName, rows, referenceLabel: 'Entry type' });
+  }
+  const hasReport = errorRows.length > 0 || (failedRows ?? []).length > 0;
 
   async function runOps(rows: ScrapPlannedRow[], force: boolean): Promise<{ created: number; failures: FailedRow[] }> {
     let createdCount = 0;
@@ -169,6 +163,7 @@ export default function BulkScrapUploadDialog({ onClose, onSaved, can }: { onClo
             <div className="action-buttons" style={{ marginBottom: 4 }}>
               <span className="status bg-emerald-50 text-emerald-700">{actionable.length} entr{actionable.length === 1 ? 'y' : 'ies'} to record</span>
               {errorRows.length > 0 && <span className="status bg-red-50 text-red-700">{errorRows.length} errors</span>}
+              {hasReport && <button type="button" className="button secondary small" style={{ marginLeft: 'auto' }} onClick={printErrors}><Printer size={14} /> Print error report</button>}
             </div>
             <div className="report-table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
               <table className="report-table"><thead><tr><th>Row</th><th>Date</th><th>Type</th><th>Details</th></tr></thead><tbody>
@@ -199,7 +194,7 @@ export default function BulkScrapUploadDialog({ onClose, onSaved, can }: { onClo
             <div className="empty" style={{ padding: '18px 12px' }}>
               {failedRows.length === 0 ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
               <strong>{failedRows.length === 0 ? 'Upload applied' : 'Upload finished with some failures'}</strong>
-              <span>{created} entr{created === 1 ? 'y' : 'ies'} recorded{failedRows.length > 0 ? ` · ${failedRows.length} failed` : ''}</span>
+              <span>{created} entr{created === 1 ? 'y' : 'ies'} recorded{failedRows.length > 0 ? ` · ${failedRows.length} failed` : ''}{errorRows.length > 0 ? ` · ${errorRows.length} not imported (errors)` : ''}</span>
             </div>
 
             {failedRows.length > 0 && <>
@@ -221,6 +216,7 @@ export default function BulkScrapUploadDialog({ onClose, onSaved, can }: { onClo
 
             {applying && <p className="muted">Applying… {progress} / {insufficientCashRows.length}</p>}
             <div style={{ display: 'flex', gap: 8 }}>
+              {hasReport && <button type="button" className="button secondary" onClick={printErrors}><Printer size={16} /> Print error report</button>}
               <button type="button" className="button secondary wide" onClick={onClose}>Close</button>
               {insufficientCashRows.length > 0 && can('scrap.manage') && (
                 <button type="button" className="button primary wide" disabled={applying} onClick={() => void retryInsufficientCashWithForce()}>

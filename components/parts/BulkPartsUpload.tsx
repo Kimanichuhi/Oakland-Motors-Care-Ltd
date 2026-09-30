@@ -3,7 +3,8 @@ import { supabase } from '@/lib/supabase';
 import { parseCSVRows } from '@/lib/csv';
 import { downloadCSV } from '@/lib/formatting';
 import { firstNonEmpty, planRows, MODE_LABELS, type UploadMode, type ExistingPart, type PlannedRow } from '@/lib/partsImport';
-import { Upload, Download, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { errorMessage, printUploadErrorReport, type UploadErrorReportRow } from '@/lib/uploadErrorReport';
+import { Upload, Download, X, AlertTriangle, CheckCircle2, Printer } from 'lucide-react';
 
 function downloadTemplate() {
   downloadCSV('Oakland_Parts_Upload_Template.csv', [{
@@ -30,9 +31,10 @@ export default function BulkPartsUploadDialog({ onClose, onSaved }: { onClose: (
   const [progress, setProgress] = useState(0);
   const [parseError, setParseError] = useState('');
   const [done, setDone] = useState<{ created: number; received: number; updated: number; adjusted: number; failed: number } | null>(null);
+  const [failedRows, setFailedRows] = useState<{ row: PlannedRow; message: string }[]>([]);
 
   async function handleFile(file: File) {
-    setParseError(''); setPlanned(null); setDone(null); setSuppliersCreated([]); setFileName(file.name); setParsing(true);
+    setParseError(''); setPlanned(null); setDone(null); setFailedRows([]); setSuppliersCreated([]); setFileName(file.name); setParsing(true);
     try {
       const text = await file.text();
       const rows = parseCSVRows(text);
@@ -72,11 +74,22 @@ export default function BulkPartsUploadDialog({ onClose, onSaved }: { onClose: (
   const skippedRows = (planned ?? []).filter((r) => r.action === 'SKIP');
   const subtotalWarnings = skippedRows.filter((r) => r.warnings.length > 0);
 
+  function printErrors() {
+    const rows: UploadErrorReportRow[] = [
+      ...errorRows.map((r) => ({ rowNumber: r.rowNumber, reference: r.sku || '—', stage: 'CHECK' as const, errors: r.errors, warnings: r.warnings })),
+      ...failedRows.map((f) => ({ rowNumber: f.row.rowNumber, reference: f.row.sku, stage: 'SAVE' as const, errors: [f.message] })),
+      ...subtotalWarnings.map((r) => ({ rowNumber: r.rowNumber, reference: 'Subtotal row', stage: 'NOTE' as const, errors: [], warnings: r.warnings })),
+    ];
+    printUploadErrorReport({ title: 'Parts', fileName, rows, referenceLabel: 'Part / SKU' });
+  }
+  const hasReport = errorRows.length > 0 || subtotalWarnings.length > 0 || failedRows.length > 0;
+
   async function apply() {
     if (!planned) return;
     setApplying(true); setProgress(0);
     let created = 0, received = 0, updated = 0, adjusted = 0, failed = 0;
     const skuToRealId = new Map<string, string>();
+    const failures: { row: PlannedRow; message: string }[] = [];
 
     for (const row of actionable) {
       try {
@@ -115,13 +128,15 @@ export default function BulkPartsUploadDialog({ onClose, onSaved }: { onClose: (
           adjusted++;
         }
         if (row.action === 'UPDATE') updated++;
-      } catch {
+      } catch (err) {
         failed++;
+        failures.push({ row, message: errorMessage(err) });
       }
       setProgress((p) => p + 1);
     }
 
     setApplying(false);
+    setFailedRows(failures);
     setDone({ created, received, updated, adjusted, failed });
     if (failed === 0) onSaved(`Bulk upload applied: ${created} created, ${received} received, ${updated} updated.`);
   }
@@ -160,6 +175,7 @@ export default function BulkPartsUploadDialog({ onClose, onSaved }: { onClose: (
               {noChangeRows.length > 0 && <span className="status bg-slate-100 text-slate-600">{noChangeRows.length} unchanged</span>}
               {skippedRows.length > 0 && <span className="status bg-slate-100 text-slate-600">{skippedRows.length} skipped (subtotal/blank rows)</span>}
               {errorRows.length > 0 && <span className="status bg-red-50 text-red-700">{errorRows.length} errors</span>}
+              {hasReport && <button type="button" className="button secondary small" style={{ marginLeft: 'auto' }} onClick={printErrors}><Printer size={14} /> Print error report</button>}
             </div>
             {suppliersCreated.length > 0 && <p className="muted" style={{ fontSize: 12 }}><CheckCircle2 size={12} style={{ verticalAlign: -1 }} /> Created {suppliersCreated.length} new supplier{suppliersCreated.length === 1 ? '' : 's'}: {suppliersCreated.join(', ')}.</p>}
             {subtotalWarnings.map((r) => <div key={r.rowNumber} className="form-error" style={{ fontSize: 12 }}><AlertTriangle size={12} style={{ verticalAlign: -1 }} /> Row {r.rowNumber}: {r.warnings.join(' ')}</div>)}
@@ -192,9 +208,17 @@ export default function BulkPartsUploadDialog({ onClose, onSaved }: { onClose: (
             <div className="empty" style={{ padding: '18px 12px' }}>
               {done.failed === 0 ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
               <strong>{done.failed === 0 ? 'Upload applied' : 'Upload finished with some failures'}</strong>
-              <span>{done.created} created · {done.received} receipts recorded · {done.updated} updated ({done.adjusted} with a quantity adjustment){done.failed > 0 ? ` · ${done.failed} failed` : ''}</span>
+              <span>{done.created} created · {done.received} receipts recorded · {done.updated} updated ({done.adjusted} with a quantity adjustment){done.failed > 0 ? ` · ${done.failed} failed` : ''}{errorRows.length > 0 ? ` · ${errorRows.length} not imported (errors)` : ''}</span>
             </div>
-            <button type="button" className="button primary wide" onClick={onClose}>Close</button>
+            {failedRows.length > 0 && <div className="report-table-wrap" style={{ maxHeight: 220, overflowY: 'auto' }}>
+              <table className="report-table"><thead><tr><th>Row</th><th>SKU</th><th>Reason</th></tr></thead><tbody>
+                {failedRows.map((f) => <tr key={f.row.rowNumber}><td>{f.row.rowNumber}</td><td>{f.row.sku}</td><td style={{ fontSize: 11, color: '#a4493d' }}>{f.message}</td></tr>)}
+              </tbody></table>
+            </div>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              {hasReport && <button type="button" className="button secondary" onClick={printErrors}><Printer size={16} /> Print error report</button>}
+              <button type="button" className="button primary wide" onClick={onClose}>Close</button>
+            </div>
           </div>
         )}
       </div>
