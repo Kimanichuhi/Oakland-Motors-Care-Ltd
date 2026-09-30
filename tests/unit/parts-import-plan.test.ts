@@ -21,10 +21,11 @@ describe('planRows against a real-world messy parts import (RECEIVE mode)', () =
     expect(row!.action).not.toBe('ERROR');
   });
 
-  it('only errors on rows genuinely missing a description', () => {
-    const errors = planned.filter((p) => p.action === 'ERROR');
-    expect(errors.length).toBeGreaterThan(0);
-    for (const e of errors) expect(e.errors).toEqual(['New part needs a Description.']);
+  it('names new parts with no Description after their Part/spare No instead of rejecting them', () => {
+    expect(planned.filter((p) => p.action === 'ERROR')).toHaveLength(0);
+    const bare = planned.filter((p) => p.action === 'CREATE' && p.warnings.some((w) => w.startsWith('No Description')));
+    expect(bare.length).toBeGreaterThan(0);
+    for (const p of bare) expect(p.createPayload?.name).toBe(p.sku.trim());
   });
 
   it('flags a batch whose stated subtotal does not match its line items', () => {
@@ -75,5 +76,46 @@ describe('planRows quantity semantics', () => {
     const [row] = planRows(rowsWithTotal, [], new Map(), 'RECEIVE');
     expect(row.action).toBe('CREATE');
     expect(row.createPayload?.cost_price_minor).toBe(10000); // 100.00 per unit
+  });
+});
+
+describe('planRows with spreadsheet leftovers and bare part names', () => {
+  // Same shape as a real supplier batch: items, two copied-down date/supplier
+  // lines with a "-" total, an unlabelled batch total, a blank line, then
+  // parts with no Description.
+  const csv = [
+    'Part/spare No,Description,Vehicle model & part make,Remarks,Quantity,Unit Cost Price,Total Stock Price,Date Purchased,Supplier',
+    'Filler 1kg,IFS,,,10," 1,000.00 "," 10,000.00 ",9/12/2026,Test Supplier',
+    'Thinner 1L,Gokul,,,20, 150.00 ," 3,000.00 ",9/12/2026,Test Supplier',
+    ',,,,,, -   ,9/12/2026,Test Supplier',
+    ',,,,,, -   ,9/12/2026,Test Supplier',
+    ',,,,,," 13,000.00 ",,',
+    ',,,,,,,,',
+    'Rivets Tall,,,,60, 2.50 , 150.00 ,9/19/2026,',
+  ].join('\r\n');
+  const planned = planRows(parseCSVRows(csv), [], new Map([['test supplier', 'sup-1']]), 'RECEIVE');
+
+  it('skips copied-down date/supplier lines instead of rejecting them', () => {
+    expect(planned[2]).toMatchObject({ rowNumber: 4, action: 'SKIP', errors: [] });
+    expect(planned[3]).toMatchObject({ rowNumber: 5, action: 'SKIP', errors: [] });
+  });
+
+  it('treats an unlabelled total as a batch total and checks it', () => {
+    expect(planned[4]).toMatchObject({ rowNumber: 6, action: 'SKIP', warnings: [] }); // 10,000 + 3,000 = 13,000
+    const off = planRows(parseCSVRows(csv.replace('" 13,000.00 "', '" 14,000.00 "')), [], new Map([['test supplier', 'sup-1']]), 'RECEIVE');
+    expect(off[4].warnings[0]).toContain('sum to');
+  });
+
+  it('names a new part after its Part/spare No when Description is blank', () => {
+    const rivets = planned[6];
+    expect(rivets.action).toBe('CREATE');
+    expect(rivets.createPayload?.name).toBe('Rivets Tall');
+    expect(rivets.receive?.quantity).toBe(60);
+  });
+
+  it('still rejects a row with item data but no Part/spare No', () => {
+    const [row] = planRows(parseCSVRows('Part/spare No,Description,Quantity\r\n,Brake pads,4'), [], new Map(), 'RECEIVE');
+    expect(row.action).toBe('ERROR');
+    expect(row.errors[0]).toContain('Missing Part/spare No');
   });
 });

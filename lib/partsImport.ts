@@ -77,31 +77,43 @@ export function planRows(rows: Record<string, string>[], existing: ExistingPart[
       return;
     }
 
-    const marker = subtotalMarker(row);
-    if (marker.isSubtotal) {
+    function skipAsTotal(amount: number | null, label: string) {
       const warnings: string[] = [];
-      if (marker.amount !== null) {
-        const tolerance = Math.max(100, Math.round(Math.abs(marker.amount) * 0.01));
-        if (Math.abs(batchTotal - marker.amount) > tolerance) {
-          warnings.push(`This batch's subtotal is ${formatKes(marker.amount)} in the file, but the line items above it sum to ${formatKes(batchTotal)} — check for a missing or mistyped row.`);
+      if (amount !== null) {
+        const tolerance = Math.max(100, Math.round(Math.abs(amount) * 0.01));
+        if (Math.abs(batchTotal - amount) > tolerance) {
+          warnings.push(`This batch's subtotal is ${formatKes(amount)} in the file, but the line items above it sum to ${formatKes(batchTotal)} — check for a missing or mistyped row.`);
         }
       }
-      planned.push({ rowNumber, sku: '', action: 'SKIP', errors: [], warnings, fieldUpdates: {}, summary: ['Subtotal row — ignored'] });
+      planned.push({ rowNumber, sku: '', action: 'SKIP', errors: [], warnings, fieldUpdates: {}, summary: [`${label} — ignored`] });
       batchTotal = 0;
-      return;
     }
 
+    const marker = subtotalMarker(row);
+    if (marker.isSubtotal) { skipAsTotal(marker.amount, 'Subtotal row'); return; }
+
     const sku = firstNonEmpty(row, ['part/spare no', 'part / spare no', 'sku', 'part number']);
+    const description = firstNonEmpty(row, ['description', 'part name', 'name']);
     const errors: string[] = [];
     const warnings: string[] = [];
     const summary: string[] = [];
 
     if (!sku) {
+      // Spreadsheet leftovers carry no part at all — just a copied-down date or
+      // supplier, a "-" total, or the batch's total with no "SUBTOTAL" label.
+      // Only a row with actual item data and no SKU is a real mistake.
+      const hasItemData = description !== '' || firstNonEmpty(row, ['quantity', 'qty']) !== '' || firstNonEmpty(row, ['unit cost price', 'unit cost', 'cost price']) !== '';
+      if (!hasItemData) {
+        const totalRaw = firstNonEmpty(row, ['total stock price', 'total stock value', 'total price', 'total cost']);
+        const amount = totalRaw ? parseMoney(totalRaw) : null;
+        if (amount) skipAsTotal(amount, 'Batch total row');
+        else planned.push({ rowNumber, sku: '', action: 'SKIP', errors: [], warnings: [], fieldUpdates: {}, summary: ['No part on this row — ignored'] });
+        return;
+      }
       planned.push({ rowNumber, sku: '', action: 'ERROR', errors: ['Missing Part/spare No (SKU) — row skipped.'], warnings, fieldUpdates: {}, summary });
       return;
     }
 
-    const description = firstNonEmpty(row, ['description', 'part name', 'name']);
     const remarksRaw = firstNonEmpty(row, ['remarks', 'notes']);
     const vehicleModelCol = firstNonEmpty(row, ['vehicle model']);
     const partMakeCol = firstNonEmpty(row, ['part make', 'brand']);
@@ -170,10 +182,13 @@ export function planRows(rows: Record<string, string>[], existing: ExistingPart[
     const targetIsNewInFile = existingPart?.id.startsWith('__NEW_');
 
     if (!existingPart) {
-      if (!description) errors.push('New part needs a Description.');
       if (errors.length > 0) { planned.push({ rowNumber, sku, action: 'ERROR', errors, warnings, fieldUpdates: {}, summary }); return; }
+      // Names like "Rivets Tall" already describe the part, so a blank
+      // Description falls back to the Part/spare No instead of blocking the row.
+      const name = description || sku.trim();
+      if (!description) warnings.push(`No Description — the part is named "${name}"; edit it afterward if needed.`);
       const createPayload: Record<string, unknown> = {
-        sku, name: description, category: 'General', selling_price_minor: 0,
+        sku, name, category: 'General', selling_price_minor: 0,
         brand: brand || null, vehicle_model: vehicleModel || null, remarks: remarksRaw || null,
         date_purchased: datePurchased ?? null, supplier_id: supplierId ?? null,
         cost_price_minor: costMinor ?? 0, quantity_on_hand: 0, reorder_level: 0,
@@ -182,7 +197,7 @@ export function planRows(rows: Record<string, string>[], existing: ExistingPart[
       summary.push(quantity ? `New part created, then ${quantity} units received${costMinor !== null ? ` @ ${formatKes(costMinor)} each` : ''}` : 'New part will be created (no quantity given)');
       bySku.set(key, {
         id: `__NEW_${rowNumber}__`, sku, quantity_on_hand: quantity ?? 0, cost_price_minor: costMinor ?? 0,
-        name: description, vehicle_model: vehicleModel || null, brand: brand || null, remarks: remarksRaw || null,
+        name, vehicle_model: vehicleModel || null, brand: brand || null, remarks: remarksRaw || null,
         date_purchased: datePurchased ?? null, supplier_id: supplierId ?? null,
       });
       planned.push({
