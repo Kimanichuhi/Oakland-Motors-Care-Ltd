@@ -180,6 +180,15 @@ describe('planSalesRows M-Pesa handling', () => {
   });
 });
 
+describe('part matching', () => {
+  it('ignores extra spaces and case in the part name', () => {
+    const parts: ExistingPartForSale[] = [{ id: 'oil', sku: '20W-50 Engine Oil  (4 Ltr) (Petrol)', name: 'Engine oil', category: null, selling_price_minor: 250000, quantity_on_hand: 4, active: true }];
+    const [row] = planSalesRows([{ rowNumber: 3, date: '21 Sep 2026', changeInDays: '', customerName: '', vehicle: '', vehicleModel: '', sku: '20w-50 engine oil (4 Ltr) (Petrol)', description: '', quantity: '1', price: '2500', sparesTotal: '2500', labour: '', total: '2500', dayTotal: '', cashMpesaBanked: '', debt: '', jobCardNo: '', shelfCount: '', systemStock: '', mpesaCode: '' }], parts);
+    expect(row.action).toBe('SALE');
+    expect(row.payload?.p_items[0].part_id).toBe('oil');
+  });
+});
+
 describe('normaliseJobCardNumber', () => {
   it('matches the day book\'s spellings of a work order number', () => {
     expect(normaliseJobCardNumber('JB-53')).toBe('jb-053');

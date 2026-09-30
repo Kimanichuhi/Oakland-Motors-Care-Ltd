@@ -140,6 +140,12 @@ export function normaliseJobCardNumber(raw: string): string | null {
   return m ? `jb-${m[1].padStart(3, '0')}` : t;
 }
 
+/** How a day-book part name is matched to a part: case and spacing don't
+ * count, so "20W-50 Engine Oil (4 Ltr)" finds "20W-50 Engine Oil  (4 Ltr)". */
+export function skuKey(sku: string): string {
+  return sku.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 export type ExistingPartForSale = {
   id: string; sku: string; name: string; category: string | null; selling_price_minor: number; quantity_on_hand: number; active: boolean;
 };
@@ -177,7 +183,7 @@ export function planSalesRows(
   jobCardsByNumber: Map<string, JobCardRef> = new Map(),
   existingPaymentCodes: Set<string> = new Set(),
 ): SalesPlannedRow[] {
-  const bySku = new Map(parts.map((p) => [p.sku.trim().toLowerCase(), p]));
+  const bySku = new Map(parts.map((p) => [skuKey(p.sku), p]));
   const stockBySku = new Map<string, number>();
   const codeFirstSeen = new Map<string, { rowNumber: number; date: string }>();
   const planned: SalesPlannedRow[] = [];
@@ -239,7 +245,7 @@ export function planSalesRows(
     }
     if (!parsedDate) errors.push(`Unrecognised date "${row.date}" — expected a format like "1 Aug 2026".`);
 
-    const part = bySku.get(row.sku.trim().toLowerCase());
+    const part = bySku.get(skuKey(row.sku));
     if (!part) {
       errors.push(`Part "${row.sku}" was not found. Import it via the Parts bulk upload first.`);
       planned.push({ rowNumber: row.rowNumber, date: dateStr, sku: row.sku, action: 'ERROR', errors, warnings, summary });
