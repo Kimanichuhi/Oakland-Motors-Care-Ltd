@@ -22,15 +22,17 @@ type SalesDebtQueryRow = {
   balance_minor: number;
 };
 
-/** Credit/partially-paid counter sales, read live from `sales` — same source SalesSection's
+/** Credit/partially-paid sales, read live from `sales` — same source SalesSection's
  * own "Debt" column uses — so it can never drift out of sync with payments recorded there.
- * Sales generated from a job card (job_card_id set) are excluded: their value is already
- * counted in fetchJobCardDebts() via job_card_parts, so including them here would double it. */
+ * Sales the app generates from a job card's parts (customer_type JOB_CARD) are excluded:
+ * their value is already counted in fetchJobCardDebts() via job_card_parts, so including
+ * them here would double it. Counter or day-book sales that merely reference a work order
+ * are not in job_card_parts, so their unpaid balance is listed here. */
 export async function fetchSalesDebts(): Promise<SalesDebtRow[]> {
   const { data } = await supabase
     .from('sales')
     .select('id,sale_number,sale_date,customer_name,customer_phone,salesperson_name,payment_method,balance_minor')
-    .is('job_card_id', null)
+    .neq('customer_type', 'JOB_CARD')
     .neq('status', 'VOIDED')
     .gt('balance_minor', 0)
     .order('sale_date', { ascending: false })

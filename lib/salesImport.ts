@@ -1,5 +1,5 @@
 import { parseCSV } from '@/lib/csv';
-import { formatKes, localDayStart, localDateStr, displayToMinor } from '@/lib/formatting';
+import { formatKes, formatDate, localDayStart, localDateStr, displayToMinor } from '@/lib/formatting';
 
 /** The paper "Spares Sales Day Book" this business keeps has a two-row merged
  * header (a "SPARES SALES" super-header spanning seven columns), which a normal
@@ -172,11 +172,11 @@ export type SalesPlannedRow = {
 };
 
 /** Payments in the day book are recorded per day (or per M-Pesa transaction),
- * not per part: CASH/MPESA/BANKED and DEBT hold the amounts received and owed,
- * usually on the day's last row, and often include work-order labour. So every
- * part row is recorded as paid — through the work order when it has a JB
- * number, otherwise at the counter — and the day's money figures are reported
- * as a day-level note instead of being pinned on whichever part shares the row. */
+ * not per part: CASH/MPESA/BANKED holds the amount received, usually on the
+ * day's last row, and often includes work-order labour. So every part row is
+ * planned as paid — through the work order when it has a JB number, otherwise
+ * at the counter. The DEBT column is planned separately by findDayBookDebts,
+ * since a debt can belong to one item or to the whole day. */
 export function planSalesRows(
   rows: DailySalesRawRow[],
   parts: ExistingPartForSale[],
@@ -190,8 +190,6 @@ export function planSalesRows(
 
   let dayAccumulated = 0;
   let dayStatedTotal: number | null = null;
-  let dayReceived = 0;
-  let dayDebt = 0;
   let dayHasItems = false;
   let currentDate: string | null = null;
 
@@ -208,12 +206,6 @@ export function planSalesRows(
         });
       }
     }
-    if (dayDebt > 0) {
-      planned.push({
-        rowNumber: -1, date: currentDate, sku: '', action: 'SKIP', errors: [], summary: ['Day debt'],
-        warnings: [`${currentDate}: the book records ${formatKes(dayDebt)} owed${dayReceived > 0 ? ` (and ${formatKes(dayReceived)} received)` : ''} for this day. Debt isn't attached to individual part sales — record it against the work order or in the Debt Register.`],
-      });
-    }
   }
 
   rows.forEach((row) => {
@@ -228,16 +220,12 @@ export function planSalesRows(
       currentDate = dateStr;
       dayAccumulated = 0;
       dayStatedTotal = null;
-      dayReceived = 0;
-      dayDebt = 0;
       dayHasItems = false;
     }
     if (!isEmptyCell(row.dayTotal)) {
       const v = parseMoney(row.dayTotal);
       if (v !== null) dayStatedTotal = v;
     }
-    if (parseStatedMethod(row.cashMpesaBanked) === null) dayReceived += parseMoney(row.cashMpesaBanked) ?? 0;
-    dayDebt += parseMoney(row.debt) ?? 0;
 
     if (isEmptyCell(row.sku)) {
       planned.push({ rowNumber: row.rowNumber, date: dateStr, sku: '', action: 'SKIP', errors, warnings, summary: ['No part on this row — ignored'] });
@@ -363,4 +351,78 @@ export function planSalesRows(
   flushDay();
 
   return planned;
+}
+
+export type SalePayload = NonNullable<SalesPlannedRow['payload']>;
+
+/** A sale's grand total exactly as complete_sale computes it. */
+export function saleTotalMinor(payload: SalePayload): number {
+  const spares = payload.p_items.reduce((sum, i) => sum + Math.round(i.quantity * i.unit_price_minor), 0);
+  return Math.max(spares - payload.p_discount_minor, 0) + payload.p_labour_minor;
+}
+
+/** ITEM: the debt belongs to the part sold on that row — the sale is saved
+ * partly paid (or unpaid, on credit) and shows in the Debt Register from there.
+ * DAY: the debt is for the day as a whole — one Debt Register entry dated that
+ * day, not tied to any part. */
+export type DebtMode = 'ITEM' | 'DAY';
+
+export type DayBookDebt = {
+  /** CSV row the DEBT figure is written on. */
+  rowNumber: number;
+  /** YYYY-MM-DD */
+  date: string;
+  dateLabel: string;
+  amountMinor: number;
+  /** The part sold on the same row, when that row is being imported. */
+  saleSku: string | null;
+  saleTotalMinor: number | null;
+  /** A debt can only belong to the item if the item's sale is imported and covers it. */
+  canBeItem: boolean;
+  defaultMode: DebtMode;
+};
+
+/** Every non-zero DEBT cell in the file. The day book usually writes the day's
+ * total debt on its last row, so every debt starts as a day debt; it can be
+ * switched to the item on its row when that row's sale is imported and covers it. */
+export function findDayBookDebts(rows: DailySalesRawRow[], planned: SalesPlannedRow[]): DayBookDebt[] {
+  const saleByRow = new Map(planned.filter((p) => p.action === 'SALE' && p.payload).map((p) => [p.rowNumber, p]));
+  const debts: DayBookDebt[] = [];
+  for (const row of rows) {
+    const amountMinor = parseMoney(row.debt);
+    if (!amountMinor || amountMinor <= 0) continue;
+    const parsed = parseDayBookDate(row.date);
+    const sale = saleByRow.get(row.rowNumber);
+    const total = sale?.payload ? saleTotalMinor(sale.payload) : null;
+    const canBeItem = total !== null && amountMinor <= total;
+    debts.push({
+      rowNumber: row.rowNumber,
+      date: parsed ? localDateStr(parsed) : row.date,
+      dateLabel: parsed ? formatDate(parsed) : row.date,
+      amountMinor,
+      saleSku: sale?.sku ?? null,
+      saleTotalMinor: total,
+      canBeItem,
+      defaultMode: 'DAY',
+    });
+  }
+  return debts;
+}
+
+/** The sale with `debtMinor` of it still owed: partly paid, or unpaid on
+ * credit when the whole amount is owed. */
+export function withItemDebt(payload: SalePayload, debtMinor: number): SalePayload {
+  const total = saleTotalMinor(payload);
+  const paid = total - Math.min(debtMinor, total);
+  return {
+    ...payload,
+    p_amount_paid_minor: paid,
+    p_payment_status: paid === 0 ? 'PENDING' : 'PARTIAL',
+    p_payment_method: paid === 0 ? 'CREDIT' : payload.p_payment_method,
+  };
+}
+
+/** What a day debt is called in the Debt Register. */
+export function dayDebtDescription(debt: Pick<DayBookDebt, 'dateLabel'>): string {
+  return `Spares sales day book — debt for ${debt.dateLabel}`;
 }

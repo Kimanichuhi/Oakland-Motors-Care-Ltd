@@ -186,7 +186,7 @@ export default function SalesSection({ query, onNew, onSelect, can, onNotice }: 
           {can('sales.create') && <button className="button primary" onClick={onNew}><Plus size={15} /> New sale</button>}
         </div>
       </div>
-      {showBulkUpload && <BulkSalesUploadDialog onClose={() => setShowBulkUpload(false)} onSaved={(m) => { setShowBulkUpload(false); onNotice(m); setRefreshKey((k) => k + 1); }} canOverridePrice={can('sales.price.override')} />}
+      {showBulkUpload && <BulkSalesUploadDialog onClose={() => setShowBulkUpload(false)} onSaved={(m) => { setShowBulkUpload(false); onNotice(m); setRefreshKey((k) => k + 1); }} canOverridePrice={can('sales.price.override')} canManageDebts={can('debt.manage')} />}
 
       <div className="form-row modal-form" style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))', alignItems: 'end', marginBottom: 12 }}>
         <label>From<input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /></label>

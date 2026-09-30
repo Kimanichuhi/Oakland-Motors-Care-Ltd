@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { parseCSVRows } from '@/lib/csv';
 import { planRows } from '@/lib/partsImport';
-import { parseDailySalesCSV, parseDayBookDate, planSalesRows, normaliseJobCardNumber, type ExistingPartForSale, type JobCardRef } from '@/lib/salesImport';
+import { parseDailySalesCSV, parseDayBookDate, planSalesRows, normaliseJobCardNumber, findDayBookDebts, withItemDebt, dayDebtDescription, type ExistingPartForSale, type JobCardRef } from '@/lib/salesImport';
 
 /** Builds the parts catalogue exactly as it would exist in the database after
  * running the parts bulk-upload plan for PARTS_ready_to_import.csv, including
@@ -86,17 +86,16 @@ describe('planSalesRows against a real-world daily sales log', () => {
     expect(second.errors[0]).toContain('Insufficient stock');
   });
 
-  it("keeps the day's DEBT off the part sale and flags it for the day instead", () => {
+  it('plans the sale as paid and lists the DEBT separately, as a day debt by default', () => {
     const testParts: ExistingPartForSale[] = [{ id: 'p1', sku: 'X-1', name: 'Widget', category: null, selling_price_minor: 100, quantity_on_hand: 10, active: true }];
     const rows = [
       { rowNumber: 3, date: '1 Aug 2026', changeInDays: '', customerName: '', vehicle: '', vehicleModel: '', sku: 'X-1', description: '', quantity: '1', price: '100', sparesTotal: '100', labour: '', total: '100', dayTotal: '', cashMpesaBanked: '', debt: '40', jobCardNo: '', shelfCount: '', systemStock: '', mpesaCode: '' },
     ];
-    const [row, dayNote] = planSalesRows(rows, testParts);
-    expect(row.payload?.p_payment_method).toBe('CASH');
-    expect(row.payload?.p_payment_status).toBe('PAID');
-    expect(row.payload?.p_amount_paid_minor).toBe(10000);
-    expect(dayNote.rowNumber).toBe(-1);
-    expect(dayNote.warnings[0]).toMatch(/Ksh\s40 owed/);
+    const planned = planSalesRows(rows, testParts);
+    expect(planned).toHaveLength(1);
+    expect(planned[0].payload?.p_payment_status).toBe('PAID');
+    const [debt] = findDayBookDebts(rows, planned);
+    expect(debt).toMatchObject({ rowNumber: 3, date: '2026-08-01', amountMinor: 4000, saleSku: 'X-1', saleTotalMinor: 10000, canBeItem: true, defaultMode: 'DAY' });
   });
 
   it('day totals match once fractional rows are imported (the old 7 and 9 Sep gaps were exactly those rows)', () => {
@@ -228,10 +227,21 @@ describe('planSalesRows against the September day book (daily sales_10.csv)', ()
     expect(errors[0].errors[0]).toContain('Insufficient stock');
   });
 
-  it('matches every Day Total and flags only the three days with debt', () => {
-    const notes = planned.filter((p) => p.rowNumber === -1);
-    expect(notes.every((n) => n.summary[0] === 'Day debt')).toBe(true);
-    expect(notes.map((n) => n.date)).toEqual(['2026-09-16', '2026-09-25', '2026-09-26']);
+  it('matches every Day Total', () => {
+    expect(planned.filter((p) => p.rowNumber === -1)).toHaveLength(0);
+  });
+
+  it('finds the three DEBT amounts, all recorded per day by default', () => {
+    const debts = findDayBookDebts(raw, planned);
+    expect(debts.map((d) => [d.date, d.amountMinor, d.defaultMode])).toEqual([
+      ['2026-09-16', 310000, 'DAY'],
+      ['2026-09-25', 280000, 'DAY'],
+      ['2026-09-26', 5000, 'DAY'],
+    ]);
+    // 16 Sep's 3,100 is written on a Ksh 150 newspaper row, so it can only be a day debt.
+    expect(debts[0].canBeItem).toBe(false);
+    // 25 Sep's 2,800 sits on a Ksh 5,200 body filler row, so it could be switched to that item.
+    expect(debts[1].canBeItem).toBe(true);
   });
 
   it('stores a sixth of a sheet to 4 decimal places, a cent off the book at most', () => {
@@ -242,5 +252,47 @@ describe('planSalesRows against the September day book (daily sales_10.csv)', ()
 
   it('never warns about "Walk in" as a missing work order', () => {
     expect(planned.some((p) => p.warnings.some((w) => w.includes('"Walk in"')))).toBe(false);
+  });
+});
+
+describe('day book debts', () => {
+  const payload = {
+    p_customer_name: 'Walk-in customer', p_customer_phone: null, p_customer_type: 'WALK_IN',
+    p_payment_method: 'MPESA', p_payment_status: 'PAID', p_sale_date: '2026-09-25T00:00:00+03:00',
+    p_discount_minor: 0, p_amount_paid_minor: 520000,
+    p_items: [{ part_id: 'p1', quantity: 2, unit_price_minor: 260000, shelf_count: null }],
+    p_payment_reference: 'SHK3XYZ9AB', p_payment_reference_at: '2026-09-25T00:00:00+03:00',
+    p_vehicle_reg: null, p_vehicle_model: null, p_change_in_days: 0, p_labour_minor: 0, p_notes: null, p_job_card_id: null,
+  };
+
+  it('records an item debt as a partly paid sale', () => {
+    const sale = withItemDebt(payload, 280000);
+    expect(sale.p_amount_paid_minor).toBe(240000);
+    expect(sale.p_payment_status).toBe('PARTIAL');
+    expect(sale.p_payment_method).toBe('MPESA');
+  });
+
+  it('records a fully owed item as an unpaid credit sale', () => {
+    const sale = withItemDebt(payload, 520000);
+    expect(sale.p_amount_paid_minor).toBe(0);
+    expect(sale.p_payment_status).toBe('PENDING');
+    expect(sale.p_payment_method).toBe('CREDIT');
+  });
+
+  it('names a day debt after its date', () => {
+    expect(dayDebtDescription({ dateLabel: '16 Sept 2026' })).toBe('Spares sales day book — debt for 16 Sept 2026');
+  });
+
+  it('offers "this item" only when the row\'s sale is imported and covers the debt', () => {
+    const parts: ExistingPartForSale[] = [{ id: 'p1', sku: 'X-1', name: 'Widget', category: null, selling_price_minor: 100, quantity_on_hand: 10, active: true }];
+    const base = { changeInDays: '', customerName: '', vehicle: '', vehicleModel: '', description: '', quantity: '1', price: '100', sparesTotal: '100', labour: '', total: '100', dayTotal: '', cashMpesaBanked: '', jobCardNo: '', shelfCount: '', systemStock: '', mpesaCode: '' };
+    const rows = [
+      { ...base, rowNumber: 3, date: '1 Aug 2026', sku: 'X-1', debt: '150' },   // more than the sale
+      { ...base, rowNumber: 4, date: '1 Aug 2026', sku: 'NOPE', debt: '20' },   // part not found, row not imported
+      { ...base, rowNumber: 5, date: '1 Aug 2026', sku: '', debt: '75' },       // no part on the row at all
+    ];
+    const debts = findDayBookDebts(rows, planSalesRows(rows, parts));
+    expect(debts.map((d) => d.canBeItem)).toEqual([false, false, false]);
+    expect(debts.map((d) => d.saleSku)).toEqual(['X-1', null, null]);
   });
 });
