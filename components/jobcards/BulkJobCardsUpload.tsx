@@ -5,8 +5,9 @@ import {
   parseJobCardsCSV, planJobCardRows, customerKey, vehicleKey, WALK_IN_CUSTOMER_NAME,
   type JobCardPlannedRow, type ExistingCustomer, type ExistingVehicle,
 } from '@/lib/jobCardsImport';
-import { errorMessage, printUploadErrorReport, type UploadErrorReportRow } from '@/lib/uploadErrorReport';
-import { Upload, Download, X, AlertTriangle, CheckCircle2, Printer } from 'lucide-react';
+import { errorMessage, type UploadErrorReport, type UploadErrorReportRow } from '@/lib/uploadErrorReport';
+import UploadErrorReportActions from '@/components/UploadErrorReportActions';
+import { Upload, Download, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 function downloadJobCardsTemplate() {
   const header = 'Date In,Customer Name,Customer Phone,Registration Number,Make,Model,Technician,Reason / Service Required,Total Charge,Amount Paid,Payment Status,Amount Owed,Mpesa Code,Job Status';
@@ -92,12 +93,12 @@ export default function BulkJobCardsUploadDialog({ onClose, onSaved }: { onClose
   const actionable = (planned ?? []).filter((r) => r.action === 'CREATE');
   const errorRows = (planned ?? []).filter((r) => r.action === 'ERROR');
 
-  function printErrors() {
+  function errorReport(): UploadErrorReport {
     const rows: UploadErrorReportRow[] = [
       ...errorRows.map((r) => ({ rowNumber: r.rowNumber, date: r.date, reference: r.registrationNumber, stage: 'CHECK' as const, errors: r.errors, warnings: r.warnings })),
       ...(failedRows ?? []).map((f) => ({ rowNumber: f.row.rowNumber, date: f.row.date, reference: f.row.registrationNumber, stage: 'SAVE' as const, errors: [f.message] })),
     ];
-    printUploadErrorReport({ title: 'Work orders', fileName, rows, referenceLabel: 'Registration' });
+    return { title: 'Work orders', fileName, rows, referenceLabel: 'Registration' };
   }
   const hasReport = errorRows.length > 0 || (failedRows ?? []).length > 0;
 
@@ -177,7 +178,7 @@ export default function BulkJobCardsUploadDialog({ onClose, onSaved }: { onClose
             <div className="action-buttons" style={{ marginBottom: 4 }}>
               <span className="status bg-emerald-50 text-emerald-700">{actionable.length} work order{actionable.length === 1 ? '' : 's'} to create</span>
               {errorRows.length > 0 && <span className="status bg-red-50 text-red-700">{errorRows.length} errors</span>}
-              {hasReport && <button type="button" className="button secondary small" style={{ marginLeft: 'auto' }} onClick={printErrors}><Printer size={14} /> Print error report</button>}
+              {hasReport && <UploadErrorReportActions compact getReport={errorReport} style={{ marginLeft: 'auto' }} />}
             </div>
             {(createdCustomers.length > 0 || createdVehicles.length > 0) && (
               <p className="muted" style={{ fontSize: 12 }}>
@@ -227,8 +228,8 @@ export default function BulkJobCardsUploadDialog({ onClose, onSaved }: { onClose
                 </tr>)}
               </tbody></table>
             </div>}
+            {hasReport && <UploadErrorReportActions getReport={errorReport} />}
             <div style={{ display: 'flex', gap: 8 }}>
-              {hasReport && <button type="button" className="button secondary" onClick={printErrors}><Printer size={16} /> Print error report</button>}
               <button type="button" className="button primary wide" onClick={onClose}>Close</button>
             </div>
           </div>

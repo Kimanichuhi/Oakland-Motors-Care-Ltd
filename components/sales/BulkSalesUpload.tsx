@@ -2,8 +2,9 @@ import React, { useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatKes, formatDate } from '@/lib/formatting';
 import { parseDailySalesCSV, planSalesRows, splitPaymentCodes, normaliseJobCardNumber, type ExistingPartForSale, type JobCardRef, type SalesPlannedRow } from '@/lib/salesImport';
-import { errorMessage, printUploadErrorReport, type UploadErrorReportRow } from '@/lib/uploadErrorReport';
-import { Upload, Download, X, AlertTriangle, CheckCircle2, Printer } from 'lucide-react';
+import { errorMessage, type UploadErrorReport, type UploadErrorReportRow } from '@/lib/uploadErrorReport';
+import UploadErrorReportActions from '@/components/UploadErrorReportActions';
+import { Upload, Download, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 function downloadSalesTemplate() {
   const header1 = 'Date,Change in days,Customer Name,Vehicle,Vehicle model,SPARES SALES,,,,,,,Day Total,CASH/MPESA/BANKED,DEBT,JOBCARD NO,REMAINING STOCK AT SHELVES,SYSTEM REMAINING STOCK,MPESA CODE';
@@ -73,13 +74,13 @@ export default function BulkSalesUploadDialog({ onClose, onSaved, canOverridePri
   const dayWarningRows = (planned ?? []).filter((r) => r.rowNumber === -1);
   const priceOverrideNeeded = actionable.some((r) => r.warnings.some((w) => w.includes('price-override')));
 
-  function printErrors() {
+  function errorReport(): UploadErrorReport {
     const rows: UploadErrorReportRow[] = [
       ...errorRows.map((r) => ({ rowNumber: r.rowNumber, date: r.date, reference: r.sku, stage: 'CHECK' as const, errors: r.errors, warnings: r.warnings })),
       ...failedRows.map((f) => ({ rowNumber: f.row.rowNumber, date: f.row.date, reference: f.row.sku, stage: 'SAVE' as const, errors: [f.message] })),
       ...dayWarningRows.map((r) => ({ rowNumber: null, date: r.date, reference: 'Whole day', stage: 'NOTE' as const, errors: [], warnings: r.warnings })),
     ];
-    printUploadErrorReport({ title: 'Sales', fileName, rows, referenceLabel: 'Part / SKU' });
+    return { title: 'Sales', fileName, rows, referenceLabel: 'Part / SKU' };
   }
   const hasReport = errorRows.length > 0 || dayWarningRows.length > 0 || failedRows.length > 0;
 
@@ -133,7 +134,7 @@ export default function BulkSalesUploadDialog({ onClose, onSaved, canOverridePri
               <span className="status bg-emerald-50 text-emerald-700">{actionable.length} sale{actionable.length === 1 ? '' : 's'} to record</span>
               {errorRows.length > 0 && <span className="status bg-red-50 text-red-700">{errorRows.length} errors</span>}
               {dayWarningRows.length > 0 && <span className="status bg-amber-50 text-amber-700">{dayWarningRows.length} day note{dayWarningRows.length === 1 ? '' : 's'} to check</span>}
-              {hasReport && <button type="button" className="button secondary small" style={{ marginLeft: 'auto' }} onClick={printErrors}><Printer size={14} /> Print error report</button>}
+              {hasReport && <UploadErrorReportActions compact getReport={errorReport} style={{ marginLeft: 'auto' }} />}
             </div>
             {priceOverrideNeeded && !canOverridePrice && <div className="form-error"><AlertTriangle size={14} /> Some rows sell below/above the part&apos;s current price and will fail without price-override access.</div>}
             {dayWarningRows.map((r, i) => <div key={i} className="form-error" style={{ fontSize: 12 }}><AlertTriangle size={12} style={{ verticalAlign: -1 }} /> {r.warnings.join(' ')}</div>)}
@@ -183,8 +184,8 @@ export default function BulkSalesUploadDialog({ onClose, onSaved, canOverridePri
                 {failedRows.map((f) => <tr key={f.row.rowNumber}><td>{f.row.rowNumber}</td><td>{f.row.sku}</td><td style={{ fontSize: 11, color: '#a4493d' }}>{f.message}</td></tr>)}
               </tbody></table>
             </div>}
+            {hasReport && <UploadErrorReportActions getReport={errorReport} />}
             <div style={{ display: 'flex', gap: 8 }}>
-              {hasReport && <button type="button" className="button secondary" onClick={printErrors}><Printer size={16} /> Print error report</button>}
               <button type="button" className="button primary wide" onClick={onClose}>Close</button>
             </div>
           </div>

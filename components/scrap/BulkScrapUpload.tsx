@@ -3,8 +3,9 @@ import { supabase } from '@/lib/supabase';
 import { formatDate } from '@/lib/formatting';
 import { parseScrapBulkCSV, planScrapRows, type ScrapPlannedRow, type ScrapPlannedOp } from '@/lib/scrapImport';
 import type { ScrapItem } from '@/lib/types';
-import { errorMessage, printUploadErrorReport, type UploadErrorReportRow } from '@/lib/uploadErrorReport';
-import { Upload, Download, X, AlertTriangle, CheckCircle2, Printer } from 'lucide-react';
+import { errorMessage, type UploadErrorReport, type UploadErrorReportRow } from '@/lib/uploadErrorReport';
+import UploadErrorReportActions from '@/components/UploadErrorReportActions';
+import { Upload, Download, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 function downloadScrapTemplate() {
   const header = 'Date,Change in Days,Entry Type,Scrap Type,KG,Expense Category,Amount (KES),Notes';
@@ -71,12 +72,12 @@ export default function BulkScrapUploadDialog({ onClose, onSaved, can }: { onClo
   const actionable = (planned ?? []).filter((r) => r.op);
   const errorRows = (planned ?? []).filter((r) => r.action === 'ERROR');
 
-  function printErrors() {
+  function errorReport(): UploadErrorReport {
     const rows: UploadErrorReportRow[] = [
       ...errorRows.map((r) => ({ rowNumber: r.rowNumber, date: r.date, stage: 'CHECK' as const, errors: r.errors, warnings: r.warnings })),
       ...(failedRows ?? []).map((f) => ({ rowNumber: f.row.rowNumber, date: f.row.date, reference: f.row.op?.kind ?? '', stage: 'SAVE' as const, errors: [f.message.replace('INSUFFICIENT_CASH: ', '')] })),
     ];
-    printUploadErrorReport({ title: 'Scrap daily records', fileName, rows, referenceLabel: 'Entry type' });
+    return { title: 'Scrap daily records', fileName, rows, referenceLabel: 'Entry type' };
   }
   const hasReport = errorRows.length > 0 || (failedRows ?? []).length > 0;
 
@@ -163,7 +164,7 @@ export default function BulkScrapUploadDialog({ onClose, onSaved, can }: { onClo
             <div className="action-buttons" style={{ marginBottom: 4 }}>
               <span className="status bg-emerald-50 text-emerald-700">{actionable.length} entr{actionable.length === 1 ? 'y' : 'ies'} to record</span>
               {errorRows.length > 0 && <span className="status bg-red-50 text-red-700">{errorRows.length} errors</span>}
-              {hasReport && <button type="button" className="button secondary small" style={{ marginLeft: 'auto' }} onClick={printErrors}><Printer size={14} /> Print error report</button>}
+              {hasReport && <UploadErrorReportActions compact getReport={errorReport} style={{ marginLeft: 'auto' }} />}
             </div>
             <div className="report-table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
               <table className="report-table"><thead><tr><th>Row</th><th>Date</th><th>Type</th><th>Details</th></tr></thead><tbody>
@@ -215,8 +216,8 @@ export default function BulkScrapUploadDialog({ onClose, onSaved, can }: { onClo
             </>}
 
             {applying && <p className="muted">Applying… {progress} / {insufficientCashRows.length}</p>}
+            {hasReport && <UploadErrorReportActions getReport={errorReport} />}
             <div style={{ display: 'flex', gap: 8 }}>
-              {hasReport && <button type="button" className="button secondary" onClick={printErrors}><Printer size={16} /> Print error report</button>}
               <button type="button" className="button secondary wide" onClick={onClose}>Close</button>
               {insufficientCashRows.length > 0 && can('scrap.manage') && (
                 <button type="button" className="button primary wide" disabled={applying} onClick={() => void retryInsufficientCashWithForce()}>

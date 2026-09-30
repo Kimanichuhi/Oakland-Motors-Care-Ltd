@@ -3,8 +3,9 @@ import { supabase } from '@/lib/supabase';
 import { parseCSVRows } from '@/lib/csv';
 import { downloadCSV } from '@/lib/formatting';
 import { firstNonEmpty, planRows, MODE_LABELS, type UploadMode, type ExistingPart, type PlannedRow } from '@/lib/partsImport';
-import { errorMessage, printUploadErrorReport, type UploadErrorReportRow } from '@/lib/uploadErrorReport';
-import { Upload, Download, X, AlertTriangle, CheckCircle2, Printer } from 'lucide-react';
+import { errorMessage, type UploadErrorReport, type UploadErrorReportRow } from '@/lib/uploadErrorReport';
+import UploadErrorReportActions from '@/components/UploadErrorReportActions';
+import { Upload, Download, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 function downloadTemplate() {
   downloadCSV('Oakland_Parts_Upload_Template.csv', [{
@@ -74,13 +75,13 @@ export default function BulkPartsUploadDialog({ onClose, onSaved }: { onClose: (
   const skippedRows = (planned ?? []).filter((r) => r.action === 'SKIP');
   const subtotalWarnings = skippedRows.filter((r) => r.warnings.length > 0);
 
-  function printErrors() {
+  function errorReport(): UploadErrorReport {
     const rows: UploadErrorReportRow[] = [
       ...errorRows.map((r) => ({ rowNumber: r.rowNumber, reference: r.sku || '—', stage: 'CHECK' as const, errors: r.errors, warnings: r.warnings })),
       ...failedRows.map((f) => ({ rowNumber: f.row.rowNumber, reference: f.row.sku, stage: 'SAVE' as const, errors: [f.message] })),
       ...subtotalWarnings.map((r) => ({ rowNumber: r.rowNumber, reference: 'Subtotal row', stage: 'NOTE' as const, errors: [], warnings: r.warnings })),
     ];
-    printUploadErrorReport({ title: 'Parts', fileName, rows, referenceLabel: 'Part / SKU' });
+    return { title: 'Parts', fileName, rows, referenceLabel: 'Part / SKU' };
   }
   const hasReport = errorRows.length > 0 || subtotalWarnings.length > 0 || failedRows.length > 0;
 
@@ -175,7 +176,7 @@ export default function BulkPartsUploadDialog({ onClose, onSaved }: { onClose: (
               {noChangeRows.length > 0 && <span className="status bg-slate-100 text-slate-600">{noChangeRows.length} unchanged</span>}
               {skippedRows.length > 0 && <span className="status bg-slate-100 text-slate-600">{skippedRows.length} skipped (subtotal/blank rows)</span>}
               {errorRows.length > 0 && <span className="status bg-red-50 text-red-700">{errorRows.length} errors</span>}
-              {hasReport && <button type="button" className="button secondary small" style={{ marginLeft: 'auto' }} onClick={printErrors}><Printer size={14} /> Print error report</button>}
+              {hasReport && <UploadErrorReportActions compact getReport={errorReport} style={{ marginLeft: 'auto' }} />}
             </div>
             {suppliersCreated.length > 0 && <p className="muted" style={{ fontSize: 12 }}><CheckCircle2 size={12} style={{ verticalAlign: -1 }} /> Created {suppliersCreated.length} new supplier{suppliersCreated.length === 1 ? '' : 's'}: {suppliersCreated.join(', ')}.</p>}
             {subtotalWarnings.map((r) => <div key={r.rowNumber} className="form-error" style={{ fontSize: 12 }}><AlertTriangle size={12} style={{ verticalAlign: -1 }} /> Row {r.rowNumber}: {r.warnings.join(' ')}</div>)}
@@ -215,8 +216,8 @@ export default function BulkPartsUploadDialog({ onClose, onSaved }: { onClose: (
                 {failedRows.map((f) => <tr key={f.row.rowNumber}><td>{f.row.rowNumber}</td><td>{f.row.sku}</td><td style={{ fontSize: 11, color: '#a4493d' }}>{f.message}</td></tr>)}
               </tbody></table>
             </div>}
+            {hasReport && <UploadErrorReportActions getReport={errorReport} />}
             <div style={{ display: 'flex', gap: 8 }}>
-              {hasReport && <button type="button" className="button secondary" onClick={printErrors}><Printer size={16} /> Print error report</button>}
               <button type="button" className="button primary wide" onClick={onClose}>Close</button>
             </div>
           </div>
